@@ -1,8 +1,4 @@
-PROG_CXX=bcpid
-SRCS=	bcpid.cc debug.cc
+SUBDIR = bcpid bcpiutil
 
-LDADD= -lelf -lkvm -lpmc -lm -lexecinfo -lprocstat -lpthread
+.include <bsd.subdir.mk>
 
-CFLAGS += -std=c++11 -DBCPID_DEBUG
-
-.include <bsd.prog.mk>
