@@ -1,7 +1,7 @@
 PROG_CXX=bcpiutil
-SRCS=	bcpiutil ../libbcpi/libbcpi.cc ../libbcpi/crc32.c
+SRCS=	bcpiutil find_an_address.cpp ../libbcpi/libbcpi.cc ../libbcpi/crc32.c
 
-LDADD= -lz
+LDADD= -lz -ldwarf -lelf
 
 CXXFLAGS += -std=c++11 -DBCPID_DEBUG
 MAN=

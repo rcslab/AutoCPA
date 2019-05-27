@@ -35,18 +35,6 @@
 
 using namespace std;
 
-// Return the symbol that corresponds to object file
-// located at object_path locally, at offset.
-// Offset is measured from the beginning of the section
-// that is usually mapped as read and execute 
-// (or code section)
-
-const char *
-bcpid_get_symbol(const char *object_path, uint64_t offset)
-{
-    return "";
-}
-
 void 
 bcpid_signal_init(void (*signal_handler)(int num)) 
 {
@@ -71,44 +59,6 @@ bcpid_signal_init(void (*signal_handler)(int num))
     sigaction(SIGCHLD, &sa, 0);
 }
 
-struct bcpid_memory_pool {
-    vector<void *> memory;
-    int datum_size;
-    int block_size;
-    int cur_block_index;
-    int cur_allocated;
-};
-
-void bcpid_memory_pool_init(bcpid_memory_pool *p, int datum_size, int block_size) {
-    p->datum_size = datum_size;
-    p->block_size = block_size;
-    p->cur_block_index = 0;
-    p->cur_allocated = 0;
-}
-
-void *bcpid_memory_pool_new(bcpid_memory_pool *p) {
-    int num_blocks = p->memory.size();
-    if (num_blocks <= p->cur_block_index) {
-        for (int i = num_blocks; i <= p->cur_block_index; ++i) {
-            p->memory.push_back(malloc(p->block_size));
-        }
-    }
-
-    if (p->cur_allocated + p->datum_size > p->block_size) {
-        p->memory.push_back(malloc(p->block_size));
-        p->cur_block_index++;
-        p->cur_allocated = 0;
-    }
-
-    void *base = p->memory[p->cur_block_index];
-    return (void *)((uint8_t *)base+p->cur_allocated);
-}
-
-void bcpid_memory_pool_obliterate(bcpid_memory_pool *p) {
-    p->cur_block_index = 0;
-    p->cur_allocated = 0; 
-}
-
 #define BCPID_TIMER_MAGIC 0xbcd1d
 #define BCPID_INTERVAL 1000
 #define BCPID_ROUND_UP_8(x) (((x)+(7)) & (~7))
@@ -117,10 +67,9 @@ void bcpid_memory_pool_obliterate(bcpid_memory_pool *p) {
 #define BCPID_KERN_BASE 0x7fff00000000UL
 #define BCPID_MAX_DEPTH 10
 #define BCPID_TOP_ENTRIES 5
-#define BCPID_MEMORY_POOL_SIZE 1048576
 #define BCPID_OUTPUT_DIRECTORY "/var/tmp/"
-#define BCPID_EDGE_GC_THRESHOLD 50000
-#define BCPID_NODE_GC_THRESHOLD 50000
+#define BCPID_EDGE_GC_THRESHOLD 10000
+#define BCPID_NODE_GC_THRESHOLD 10000
 #define BCPID_OBJECT_HASH_GC_THRESHOLD 2000
 #define BCPID_DEFAULT_COUNT 16384
 
@@ -204,7 +153,8 @@ struct bcpid_pc_node
     struct bcpid_object *obj;
     uint64_t end_ctr[BCPI_MAX_NUM_COUNTER];
 
-    unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge> incoming_edge_map;
+    unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge>
+    incoming_edge_map;
 
     int tmp_archive_node_index;
 };
@@ -317,8 +267,8 @@ void bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path) {
     auto oit = b->object_hash_cache.find(string(path));
     if (oit != b->object_hash_cache.end()) {
         bcpid_hash_cache * cache = &oit->second;
-        if (!memcmp(&cache->last_modified, &obj->last_modified, sizeof(obj->last_modified))) {
-            //MSG("using existed hash for %s: %x", path, cache->hash);
+        if (!memcmp(&cache->last_modified, &obj->last_modified,
+                    sizeof(obj->last_modified))) {
             obj->hash = cache->hash;
             return; 
         }
@@ -333,7 +283,8 @@ void bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path) {
     }
 
     off_t file_size = s.st_size;
-    void *file_content = mmap(0, file_size, PROT_READ, MAP_NOCORE | MAP_SHARED, file_fd, 0); 
+    void *file_content = mmap(0, file_size, PROT_READ, MAP_NOCORE | MAP_SHARED,
+                              file_fd, 0); 
     if (file_content == MAP_FAILED) {
         PERROR("mmap");
         return;
@@ -351,7 +302,6 @@ void bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path) {
         PERROR("close");
     }
 
-    //MSG("new hash for %s: %x", path, hash);
     obj->hash = hash;
     if (oit == b->object_hash_cache.end()) {
         bcpid_hash_cache cache;
@@ -522,7 +472,8 @@ bcpid_save(struct bcpid *b)
         record->system_name = strdup("");
     } else {
         char system_name[512];
-        snprintf(system_name, 511, "%s %s %s %s %s", uts.sysname, uts.release, uts.version, uts.nodename, uts.machine);
+        snprintf(system_name, 511, "%s %s %s %s %s", uts.sysname, uts.release,
+                 uts.version, uts.nodename, uts.machine);
         record->system_name = strdup(system_name);
     }
 
@@ -641,7 +592,8 @@ bcpid_save(struct bcpid *b)
     strftime(time_buffer, 127, "%F_%T", t);
 
     char file_name[256];
-    sprintf(file_name, "%s/bcpi_%s_%s.bin", b->default_output_dir, time_buffer, uts.nodename);
+    snprintf(file_name, 255, "%s/bcpi_%s_%s.bin", b->default_output_dir,
+             time_buffer, uts.nodename);
     status = bcpi_save_file(record, file_name);
     if (status) {
         bcpi_free(record);
@@ -664,6 +616,13 @@ bcpid_save(struct bcpid *b)
     bcpid_garbage_collect(b);
 
     MSG("saved at %s", file_name);
+}
+
+void bcpid_program_mapping_dump(const vector<bcpid_program_mapping> &mappings) {
+    for (const bcpid_program_mapping &m: mappings) {
+        fprintf(stderr, "%lx, %lx, %lx, %x\n", m.start, m.end, m.file_offset,
+                m.protection);
+    }
 }
 
 struct bcpid_pc_node *
@@ -694,13 +653,7 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc,
     }
     
     if (pc > mapping->end && proc->pid != -1) {
-        /*
-        fprintf(stderr, "--begin--, %d\n", proc->pid);
-        for (bcpid_program_mapping &m: proc->mappings) {
-            fprintf(stderr, "%lx, %lx, %lx, %x\n", m.start, m.end, m.file_offset, m.protection);
-        }
-        fprintf(stderr, "--end--, %d (pc %lx)\n", proc->pid, pc);
-        */
+
         bcpid_debug_counter_increment(b, bcpid_debug_pc_after_mapping);
         return 0;
     }
@@ -807,7 +760,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
     if (it == b->pid_to_program.end()) {
         proc = bcpid_init_proc(b, pid);
         if (!proc) {
-            bcpid_debug_counter_increment(b, bcpid_debug_callchain_proc_init_fail);
+            bcpid_debug_counter_increment(b,
+                                          bcpid_debug_callchain_proc_init_fail);
             return;
         }
         b->pid_to_program.emplace(make_pair(pid, proc));
@@ -1128,7 +1082,8 @@ bcpid_setup_pmc(struct bcpid *b)
     
     bcpid_kevent_set(b, b->non_block_pipefd[0], EVFILT_READ, EV_ADD, 0, 0, 0);
     bcpid_kevent_set(b, STDIN_FILENO, EVFILT_READ, EV_ADD, 0, 0, 0);
-    bcpid_kevent_set(b, BCPID_TIMER_MAGIC, EVFILT_TIMER, EV_ADD, 0, BCPID_INTERVAL, 0);
+    bcpid_kevent_set(b, BCPID_TIMER_MAGIC, EVFILT_TIMER, EV_ADD, 0,
+                     BCPID_INTERVAL, 0);
 
     status = pthread_create(&b->pmclog_forward_thr, 0, bcpid_pmglog_thread_main,
                  b);
@@ -1156,7 +1111,7 @@ bcpid_setup_pmc(struct bcpid *b)
 
     const char *cpu_name = pmc_name_of_cputype(cpuinfo->pm_cputype);
     const char *suffix = ".conf";
-    char conf_name[32];
+    char conf_name[128];
 
     strcpy(conf_name, "conf/");
     strcat(conf_name, cpu_name);
@@ -1167,7 +1122,7 @@ bcpid_setup_pmc(struct bcpid *b)
     } 
     for (;;) {
         char ctr[128];
-        char *s = fgets(ctr, 128, file);
+        char *s = fgets(ctr, 127, file);
         if (!s) {
             break;
         }
@@ -1324,29 +1279,32 @@ void bcpid_collect_struct_stat(bcpid *b, bcpid_statistics *s) {
     s->num_object_hash = b->object_hash_cache.size();
 }
 
+uint64_t tv_to_sec(const struct timeval *r) {
+    uint64_t t = 0;
+    t += r->tv_usec;
+    t += r->tv_usec;
+    t += r->tv_sec * 1000000;
+    t += r->tv_sec * 1000000;
+    return t;
+} 
+
 void bcpid_handle_timer(bcpid *b) {
     struct rusage r;
     int status = getrusage(RUSAGE_SELF, &r);
+    uint64_t new_time = tv_to_sec(&r.ru_utime) + tv_to_sec(&r.ru_stime);
+    uint64_t old_time = tv_to_sec(&b->last_usage.ru_utime) + tv_to_sec(&b->last_usage.ru_stime);
+    uint64_t time_diff = new_time - old_time;
+    /*
+    fprintf(stderr, "%f\n", (double)time_diff/(double)1000000);
 
-    uint64_t new_time = 0;
-    new_time += r.ru_utime.tv_usec;
-    new_time += r.ru_stime.tv_usec;
-    new_time += r.ru_utime.tv_sec * 1000000;
-    new_time += r.ru_stime.tv_sec * 1000000;
-
-    uint64_t old_time = 0;
-    old_time += b->last_usage.ru_utime.tv_usec;
-    old_time += b->last_usage.ru_stime.tv_usec;
-    old_time += b->last_usage.ru_utime.tv_sec * 1000000;
-    old_time += b->last_usage.ru_stime.tv_sec * 1000000;
-
-//    fprintf(stderr, "%lu (d %lu) M %lu T %lu D %lu S %lu\n", new_time, new_time - old_time, r.ru_maxrss, r.ru_ixrss, r.ru_idrss, r.ru_isrss);
-//
-
+    fprintf(stderr, "%lu (d %lu) M %lu T %lu D %lu S %lu\n", new_time,
+            new_time - old_time, r.ru_maxrss, r.ru_ixrss, r.ru_idrss, 
+            r.ru_isrss);
+    */
     bcpid_statistics stats;
     bcpid_collect_struct_stat(b, &stats);
-    //fprintf(stderr, "%d %d %d %d %d\n", stats.num_object, stats.num_program, stats.num_node, stats.num_edge, stats.num_object_hash);
-
+    fprintf(stderr, "%d %d %d %d %d\n", stats.num_object, stats.num_program,
+            stats.num_node, stats.num_edge, stats.num_object_hash);
     if (stats.num_edge > b->edge_collect_threshold ||
          stats.num_node > b->node_collect_threshold) {
         MSG("saving...");

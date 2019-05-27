@@ -14,6 +14,14 @@
 
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#include <dwarf.h>
+#include <libdwarf.h>
+#include <stdlib.h>
+#include <iostream>
+#include <string>
+
+#include "find_an_address.h"
+
 
 struct util_query_parameter {
     const char *file_name;
@@ -33,7 +41,8 @@ void util_print_spaces(int n) {
     printf("%*c", n, ' ');
 }
 
-bool uitl_check_recurse_condition(struct util_query_parameter *u, int cur_level, struct bcpi_node *n) {
+bool uitl_check_recurse_condition(struct util_query_parameter *u, int cur_level,
+                                  struct bcpi_node *n) {
     int index = u->counter_index;
     if (n->internal & (1 << index)) {
         printf("(visited)\n");
@@ -49,8 +58,21 @@ bool uitl_check_recurse_condition(struct util_query_parameter *u, int cur_level,
     printf("\n");
     return true;
 }
+string check_addr(const char *object_path, uint64_t offset) {
 
-void util_traverse(struct util_query_parameter *u, int cur_level, struct bcpi_node *n) {
+    int rc=-1;
+    string dw_data;
+
+    rc=search_symbol(object_path, offset, &dw_data);
+
+    if (rc==1)
+        return "error in srchsymbol";
+    if (rc==0 )
+        return dw_data;
+}
+
+void util_traverse(struct util_query_parameter *u, int cur_level,
+                   struct bcpi_node *n) {
     vector<struct bcpi_edge *> edges;
     bcpi_collect_edge(n, edges);
     bcpi_edge_sort(u->counter_index, edges);
@@ -64,6 +86,7 @@ void util_traverse(struct util_query_parameter *u, int cur_level, struct bcpi_no
         }
         util_print_spaces(cur_level);
         printf("<- %ld : %lx (%s) ", value, from->node_address, from->object->path);
+        cout<<check_addr(from->object->path,from->node_address)<<endl;
         if (uitl_check_recurse_condition(u, cur_level + 1, from)) {
             util_traverse(u, cur_level + 1, from);
         }
@@ -87,7 +110,8 @@ void util_process(struct util_query_parameter *u) {
         uint64_t file_size = lseek(file_fd, 0, SEEK_END);
         lseek(file_fd, 0, SEEK_SET);
 
-        void *file_content = mmap(0, file_size, PROT_READ, MAP_NOCORE | MAP_SHARED, file_fd, 0); 
+        void *file_content = mmap(0, file_size, PROT_READ,
+                                  MAP_NOCORE | MAP_SHARED, file_fd, 0); 
         if (file_content == MAP_FAILED) {
             perror("mmap");
             return;
@@ -103,7 +127,7 @@ void util_process(struct util_query_parameter *u) {
         status = close(file_fd);
         if (status == -1) {
             perror("close");
-        } 
+        }
 
         fprintf(stdout, "%x\n", hash);
         return;
@@ -179,10 +203,10 @@ int main(int argc, char **argv) {
         }
 
         switch (c) {
-            case 'h': 
+            case 'h':
                 util_show_help();
                 break;
-            case 'f': 
+            case 'f':
                 util_conf->file_name = strdup(optarg);
                 break;
             case 'n':
@@ -204,7 +228,7 @@ int main(int argc, char **argv) {
                 util_conf->file_name = strdup(optarg);
                 util_conf->do_checksum = true;
                 break;
-            default: 
+            default:
                 break;
         }
     }
