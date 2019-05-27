@@ -4,24 +4,28 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <dwarf.h>
+#include <libdwarf.h>
+#include <stdlib.h>
 
+#include <sys/stat.h>
 #include <sys/fcntl.h>
 #include <sys/mman.h>
 #include <errno.h>
 
+#include "find_an_address.h"
 #include "../libbcpi/libbcpi.h"
 #include "../libbcpi/crc32.h"
 
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#include <dwarf.h>
-#include <libdwarf.h>
-#include <stdlib.h>
 #include <iostream>
 #include <string>
 
-#include "find_an_address.h"
+#define BCPI_UTIL_SYSTEM_DEBUG "/usr/lib/debug"
 
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+using namespace std;
 
 struct util_query_parameter {
     const char *file_name;
@@ -58,8 +62,8 @@ bool uitl_check_recurse_condition(struct util_query_parameter *u, int cur_level,
     printf("\n");
     return true;
 }
-string check_addr(const char *object_path, uint64_t offset) {
 
+string check_addr(const char *object_path, const char *debug_file_path, uint64_t offset) {
     int rc=-1;
     string dw_data;
 
@@ -67,8 +71,20 @@ string check_addr(const char *object_path, uint64_t offset) {
 
     if (rc==1)
         return "error in srchsymbol";
-    if (rc==0 )
+    if (rc==0)
         return dw_data;
+    return "";
+}
+
+string util_get_object_path(const char *str) {
+    string debug_ext = ".debug";
+    string debug_file_path;
+    if (strstr(str, ".ko") || !strcmp(str, "kernel")) {
+        debug_file_path = string(BCPI_UTIL_SYSTEM_DEBUG) + string("/boot/kernel/") + string(str);
+    } else {
+        debug_file_path = string(BCPI_UTIL_SYSTEM_DEBUG) + string(str);
+    }
+    return debug_file_path + debug_ext;
 }
 
 void util_traverse(struct util_query_parameter *u, int cur_level,
@@ -86,7 +102,12 @@ void util_traverse(struct util_query_parameter *u, int cur_level,
         }
         util_print_spaces(cur_level);
         printf("<- %ld : %lx (%s) ", value, from->node_address, from->object->path);
-        cout<<check_addr(from->object->path,from->node_address)<<endl;
+
+        string debug_info = util_get_object_path(from->object->path);
+        struct stat s;
+        if (stat(debug_info.c_str(), &s) != -1) {
+            cout << check_addr(from->object->path, debug_info.c_str(), from->node_address) << endl;
+        }
         if (uitl_check_recurse_condition(u, cur_level + 1, from)) {
             util_traverse(u, cur_level + 1, from);
         }
@@ -167,7 +188,13 @@ void util_process(struct util_query_parameter *u) {
         if (!value) {
             break;
         }
-        printf("* %ld: %lx (%s)\n", value, n->node_address, n->object->path);
+        printf("* %ld: %lx (%s) ", value, n->node_address, n->object->path);
+        
+        string debug_info = util_get_object_path(n->object->path);
+        struct stat s;
+        if (stat(debug_info.c_str(), &s) != -1) {
+            cout << check_addr(n->object->path, debug_info.c_str(), n->node_address) << endl;
+        }
         util_traverse(u, 1, n);
     }
 }

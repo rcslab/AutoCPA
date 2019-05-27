@@ -1,5 +1,8 @@
+#include <string>
+#include <dwarf.h>
+#include <libdwarf.h>
 
-
+using namespace std;
 
 struct section ;
 
