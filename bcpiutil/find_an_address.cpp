@@ -114,7 +114,7 @@ struct section* load_sections(Elf *e, size_t shnum) {
     warnx("elf_nextscn failed: %s", elf_errmsg(elferr));
   return sl;
 }
-
+//redundant comment
 uint64_t change_offset (uint64_t num, Elf *e){
 
   uintmax_t newnum, address, dwarfoff ;
