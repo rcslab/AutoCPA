@@ -955,8 +955,10 @@ void bcpi_print_summary(const struct bcpi_record *r) {
     }
     printf("%d objects\n", r->num_object);
     for (int i = 0; i < r->num_object; ++i) {
-        printf(" %3d: %5d nodes", i+1, r->object_list[i].num_node);
-        printf(" %s \n", r->object_list[i].path);
+        bcpi_object *obj = &r->object_list[i];
+
+        printf(" %3d: %5d nodes, %8x, ", i+1, obj->num_node, obj->hash);
+        printf(" %s \n", obj->path);
     }
 }
 

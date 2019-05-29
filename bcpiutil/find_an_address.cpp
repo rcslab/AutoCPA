@@ -1,4 +1,3 @@
-
 #include <err.h>
 #include <libelf.h>
 #include <gelf.h>
@@ -17,12 +16,7 @@
 #include <fcntl.h>
 #include <dwarf.h>
 #include <libdwarf.h>
-
-
-
-
 #include <iostream>
-
 
 #include "find_an_address.h"
 
@@ -309,7 +303,7 @@ static void dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsign
 	}
 }
 
-int search_symbol(const char* progname, Dwarf_Addr address, string *dwarf_data)
+int search_symbol(const char* progname, const char *debug_file_path, Dwarf_Addr address, string *dwarf_data)
 {
     Dwarf_Debug dbg = 0;
     Dwarf_Error err;

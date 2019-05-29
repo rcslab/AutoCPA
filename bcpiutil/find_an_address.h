@@ -19,5 +19,5 @@ void list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dw
 
 static void dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num, std::string *src_file);
 
+int search_symbol(const char* progname, const char *debug_symbol_path, Dwarf_Addr address, std::string *dwarf_data);
 
-int search_symbol(const char* progname, Dwarf_Addr address, std::string *dwarf_data);

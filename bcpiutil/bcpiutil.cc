@@ -20,7 +20,7 @@
 #include <iostream>
 #include <string>
 
-#define BCPI_UTIL_SYSTEM_DEBUG "/usr/lib/debug"
+#define BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH "/usr/lib/debug"
 
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -67,7 +67,7 @@ string check_addr(const char *object_path, const char *debug_file_path, uint64_t
     int rc=-1;
     string dw_data;
 
-    rc=search_symbol(object_path, offset, &dw_data);
+    rc = search_symbol(object_path, debug_file_path, offset, &dw_data);
 
     if (rc==1)
         return "error in srchsymbol";
@@ -77,14 +77,13 @@ string check_addr(const char *object_path, const char *debug_file_path, uint64_t
 }
 
 string util_get_object_path(const char *str) {
-    string debug_ext = ".debug";
-    string debug_file_path;
-    if (strstr(str, ".ko") || !strcmp(str, "kernel")) {
-        debug_file_path = string(BCPI_UTIL_SYSTEM_DEBUG) + string("/boot/kernel/") + string(str);
-    } else {
-        debug_file_path = string(BCPI_UTIL_SYSTEM_DEBUG) + string(str);
+    const string debug_ext = ".debug";
+    string debug_file_path = string(BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH) + string(str) + debug_ext;
+    struct stat s;
+    if (stat(debug_file_path.c_str(), &s) == -1) {
+        return string(str);
     }
-    return debug_file_path + debug_ext;
+    return debug_file_path;
 }
 
 void util_traverse(struct util_query_parameter *u, int cur_level,
@@ -104,10 +103,7 @@ void util_traverse(struct util_query_parameter *u, int cur_level,
         printf("<- %ld : %lx (%s) ", value, from->node_address, from->object->path);
 
         string debug_info = util_get_object_path(from->object->path);
-        struct stat s;
-        if (stat(debug_info.c_str(), &s) != -1) {
-            cout << check_addr(from->object->path, debug_info.c_str(), from->node_address) << endl;
-        }
+        cout << check_addr(from->object->path, debug_info.c_str(), from->node_address) << endl;
         if (uitl_check_recurse_condition(u, cur_level + 1, from)) {
             util_traverse(u, cur_level + 1, from);
         }
@@ -191,10 +187,7 @@ void util_process(struct util_query_parameter *u) {
         printf("* %ld: %lx (%s) ", value, n->node_address, n->object->path);
         
         string debug_info = util_get_object_path(n->object->path);
-        struct stat s;
-        if (stat(debug_info.c_str(), &s) != -1) {
-            cout << check_addr(n->object->path, debug_info.c_str(), n->node_address) << endl;
-        }
+        cout << check_addr(n->object->path, debug_info.c_str(), n->node_address) << endl;
         util_traverse(u, 1, n);
     }
 }

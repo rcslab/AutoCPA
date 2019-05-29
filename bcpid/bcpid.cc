@@ -72,6 +72,7 @@ bcpid_signal_init(void (*signal_handler)(int num))
 #define BCPID_NODE_GC_THRESHOLD 10000
 #define BCPID_OBJECT_HASH_GC_THRESHOLD 2000
 #define BCPID_DEFAULT_COUNT 16384
+#define BCPID_KERNEL_PATH "/boot/kernel/"
 
 typedef void (*bcpid_event_handler)(struct bcpid *b, const struct pmclog_ev *);
 
@@ -287,6 +288,7 @@ void bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path) {
                               file_fd, 0); 
     if (file_content == MAP_FAILED) {
         PERROR("mmap");
+        close(file_fd);
         return;
     }
 
@@ -371,8 +373,14 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
         return;
     }
 
+    string object_path;
+
+    if (!strcmp(path, "kernel") || strstr(path, ".ko")) {
+        object_path = string(BCPID_KERNEL_PATH) + string(path);
+    }
+
     bcpid_kernel_object ko;
-    ko.path = string(path);
+    ko.path = object_path;
     ko.start = start;
 
     b->kernel_objects.push_back(ko);
@@ -1303,8 +1311,10 @@ void bcpid_handle_timer(bcpid *b) {
     */
     bcpid_statistics stats;
     bcpid_collect_struct_stat(b, &stats);
+    /*
     fprintf(stderr, "%d %d %d %d %d\n", stats.num_object, stats.num_program,
             stats.num_node, stats.num_edge, stats.num_object_hash);
+    */
     if (stats.num_edge > b->edge_collect_threshold ||
          stats.num_node > b->node_collect_threshold) {
         MSG("saving...");
