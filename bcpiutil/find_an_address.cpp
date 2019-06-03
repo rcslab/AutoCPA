@@ -1,3 +1,4 @@
+
 #include <err.h>
 #include <libelf.h>
 #include <gelf.h>
@@ -16,7 +17,12 @@
 #include <fcntl.h>
 #include <dwarf.h>
 #include <libdwarf.h>
+
+
+
+
 #include <iostream>
+
 
 #include "find_an_address.h"
 
@@ -43,7 +49,7 @@ uint64_t calculate_nums(uint64_t address, uint64_t offset, uint64_t num){
   finaladdr= temp + address;
   return finaladdr;
 }
-
+//loading sections
 struct section* load_sections(Elf *e, size_t shnum) {
 
   struct section* sl=NULL;
@@ -303,11 +309,12 @@ static void dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsign
 	}
 }
 
-int search_symbol(const char* progname, const char *debug_file_path, Dwarf_Addr address, string *dwarf_data)
+int search_symbol(const char *progname, const char *dbg_path, Dwarf_Addr address, string *dwarf_data)
 {
     Dwarf_Debug dbg = 0;
     Dwarf_Error err;
-    int fd = -1;
+    int fd_elf = -1;
+    int fd_dwarf = -1;
     Dwarf_Arange *aranges;
     Dwarf_Signed cnt;
     Dwarf_Error de;
@@ -322,17 +329,25 @@ int search_symbol(const char* progname, const char *debug_file_path, Dwarf_Addr 
         errx (EXIT_FAILURE, "ELF library initialization"
                 "failed : %s ", elf_errmsg(-1));
 
-    if ((fd = open(progname, O_RDONLY)) < 0) {
+    if ((fd_elf = open(progname, O_RDONLY)) < 0) {
         perror("open");
-        cerr<<"error in fd"<<endl;
+        cerr<<"error in fd_elf"<<endl;
         return 1;
     }
 
-    if ((e = elf_begin(fd , ELF_C_READ, NULL)) == NULL)
+
+    if ((fd_dwarf = open(dbg_path, O_RDONLY)) < 0) {
+        perror("open");
+        cerr<<"error in fd_dwarf"<<endl;
+        return 1;
+    }
+
+
+    if ((e = elf_begin(fd_elf , ELF_C_READ, NULL)) == NULL)
          errx (EXIT_FAILURE , "elf_begin() failed : %s." ,
                elf_errmsg (-1));
 
-    if (dwarf_init(fd, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK) {
+    if (dwarf_init(fd_dwarf, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK) {
         fprintf(stderr, "Failed DWARF initialization\n");
         return 1;
     }
@@ -355,7 +370,8 @@ int search_symbol(const char* progname, const char *debug_file_path, Dwarf_Addr 
     }
 
     elf_end(e);
-    close(fd);
+    close(fd_elf);
+    close(fd_dwarf);
 
     return 0;
 }
