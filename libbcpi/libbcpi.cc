@@ -33,6 +33,11 @@ struct bcpi_serializer {
 
 #define BCPI_SERIALIZER_FIRST_SIZE 32
 
+/*
+ * Initialize structure for in memory arbitrary data writing.
+ * Allocate space.
+ */
+
 void 
 bcpi_serializer_init(struct bcpi_serializer *b) 
 {
@@ -52,6 +57,11 @@ bcpi_serilizer_finish(struct bcpi_serializer *b)
         free(b->data);
     }
 }
+
+/*
+ * Initialize structure to act like an interface for reading
+ * arbitrary binary data. Does not allocate space.
+ */
 
 void 
 bcpi_serializer_init_read(struct bcpi_serializer *b, char *data, int size) 
@@ -95,6 +105,11 @@ bcpi_serializer_get_data(struct bcpi_serializer *b)
     return b->data;
 }
 
+/*
+ * Check, and possibilly allocate space so that item_size bytes of data could be
+ * written. Update interval state overflow if allocation failed.
+ */
+
 void 
 bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size) 
 {
@@ -114,6 +129,12 @@ bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size)
         return;
     }
 }
+
+/*
+ * Check if item_size bytes of data are available for reading.
+ * Sets internal flag underflow if failed.
+ *
+ */
 
 void 
 bcpi_serializer_check_get(struct bcpi_serializer *b, int item_size) 
@@ -258,6 +279,11 @@ bcpi_serializer_add_string(struct bcpi_serializer *b, const char *str)
     bcpi_serializer_add_uint8(b, len);
     bcpi_serializer_add_bytes(b, str, len);
 }
+
+/*
+ * Get pointer to next string in the stream. Note that
+ * string needs to be copied if used for extended amount of time.
+ */
 
 char *
 bcpi_serializer_get_string(struct bcpi_serializer *b)
@@ -541,6 +567,46 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
     struct bcpi_serializer _builder;
     struct bcpi_serializer *builder = &_builder;
     bcpi_serializer_init(builder);
+
+    /*
+     * All strings are in Pascal-like format (1 byte of length including termating
+     * null followed by actual string with null terminator)
+     *
+     * The on disk structure is as follows:
+     *
+     * unix timestamp: 8 bytes
+     * name of system: variable length string
+     * number of counters recorded: 1 byte
+     * array of counter names: variable length strings one after the other
+     * number of bits for node ID: 1 byte
+     * number of objects: 3 bytes
+     * array of objects: (one after the other without gaps)
+     *      path to object: variable length string 
+     *      hash of object (crc32): 4 bytes
+     *      number of functions: 3 bytes
+     *      number of nodes: 3 bytes
+     *      object info: see struct bcpi_object_info. it is
+     *          written to the stream as is, except last member counter_bits 
+     *          where only the actual number of counters is written 
+     *      array of functions:
+     *          currently unused
+     *      array of nodes: (one after the other without gaps)
+     *          offset of next node's address relative to current: node_chain_bits/8 bytes 
+     *          bit vector denoting non-zero counter values: num_counter/8 bytes
+     *          array of counter values: (one after the other without gaps, 
+     *          containing n values where n is number of non-zero bits in the bit vector)
+     *              each counter is represented as counter_bits[i]/8 bytes
+     *          number of edges: node_num_edge_bits/8 bytes
+     *          array of edges: (one after the other without gaps)
+     *              source object index: object_id_bits/8 bytes
+     *              source node index in that object: node_id_bits/8 bytes
+     *              bit vector denoting non-zero counter values: num_counter/8 bytes
+     *              array of counter values: (one after the other without gaps, 
+     *              containing n values where n is number of non-zero bits in the bit vector)
+     *                  each counter is represented as counter_bits[i]/8 bytes
+     *
+     * The whole stream is then compressed with libz      
+     */
 
     bcpi_serializer_add_int64(builder, record->epoch);
     bcpi_serializer_add_string(builder, record->system_name);

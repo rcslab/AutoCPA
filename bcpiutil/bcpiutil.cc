@@ -30,20 +30,28 @@ using namespace std;
 struct util_query_parameter {
     const char *file_name;
     const char *counter_name;
+    // object files containing this string in their names will be included for traversal
     const char *object_name;
 
     int counter_index;
 
+    // Show this many top nodes when pretty printing call graph.
     int top_n_node;
     int max_depth;
+    // Show this many top edges when pretty printing call graph.
     int top_n_edge;
 
+    // Whether the utility should just calculate checksum and exit.
     bool do_checksum;
 };
 
 void util_print_spaces(int n) {
     printf("%*c", n, ' ');
 }
+
+/*
+ * Do not visit the same node twice; do not go too deep when traversing.
+ */
 
 bool uitl_check_recurse_condition(struct util_query_parameter *u, int cur_level,
                                   struct bcpi_node *n) {
@@ -115,6 +123,7 @@ void util_process(struct util_query_parameter *u) {
         return;
     }
 
+    // If merely do checksum, do so then exit.
     if (u->do_checksum) {
         int file_fd = open(u->file_name, O_RDONLY | O_CLOEXEC);
         if (file_fd == -1) {

@@ -35,6 +35,16 @@
 
 using namespace std;
 
+/*
+ * Set up signal handlers so that the program doesn't get
+ * terminated right away and has a chance to handle signals.
+ * This is especially useful when taking care of user pressing
+ * Ctrl-C on the program
+ *
+ * @param signal_handler function to call when SIGTERM, SIGINT or
+ * SIGHUP is delivered
+ */
+
 void 
 bcpid_signal_init(void (*signal_handler)(int num)) 
 {
@@ -54,28 +64,60 @@ bcpid_signal_init(void (*signal_handler)(int num))
     sigaction(SIGPIPE, &sa, 0);
     sigaction(SIGXCPU, &sa, 0);
 
+    // Currently we don't spawn childs, but may as well leave this here
     sa.sa_handler = SIG_DFL;
     sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT;
     sigaction(SIGCHLD, &sa, 0);
 }
 
+// Special kqueue identifier for periodic timer
 #define BCPID_TIMER_MAGIC 0xbcd1d
+
+// Interval for running periodic tasks (garbage collect samples, for example)
 #define BCPID_INTERVAL 1000
+
+// Macro for doing 8 byte alignment. Unused currently
 #define BCPID_ROUND_UP_8(x) (((x)+(7)) & (~7))
+
+// Upper bound for number of event types that PMCLOG interface delivers
+// Shouldn't require modification
 #define BCPID_MAX_NUM_PMCLOG_EVENTS 32
+
+// Max number of CPUs supported
 #define BCPID_MAX_CPU 128
+
+// A hack to know the beginning of kernel inside address space
+// of a process, since this information is not present in
+// procstat API. 
 #define BCPID_KERN_BASE 0x7fff00000000UL
-#define BCPID_MAX_DEPTH 10
-#define BCPID_TOP_ENTRIES 5
+
+// A writable directory to place compressed sample data
 #define BCPID_OUTPUT_DIRECTORY "/var/tmp/"
+
+// Force sample data to be saved on disk and 
+// purged from main memory when number of call graph
+// edges exceeds this number
 #define BCPID_EDGE_GC_THRESHOLD 10000
+
+// Force sample data to be saved on disk and 
+// purged from main memory when number of call graph
+// nodes exceeds this number
 #define BCPID_NODE_GC_THRESHOLD 10000
+
+// For performance reasons, hashes of object files are cached
+// To prevent cache from growing unbounded, it is cleared
+// when hashes of this many object files are cached
 #define BCPID_OBJECT_HASH_GC_THRESHOLD 2000
+
+// Default sampling interval
 #define BCPID_DEFAULT_COUNT 16384
+
+// Path to kernel object
 #define BCPID_KERNEL_PATH "/boot/kernel/"
 
 typedef void (*bcpid_event_handler)(struct bcpid *b, const struct pmclog_ev *);
 
+// Keep track of event received from PMCLOG interface
 struct bcpid_pmclog_event 
 {
     bool is_valid;
@@ -84,11 +126,13 @@ struct bcpid_pmclog_event
     bcpid_event_handler handler;
 };
 
+// Store ID of PMC counters allocated per CPU.
 struct bcpid_pmc_cpu 
 {
     pmc_id_t pmcs[BCPI_MAX_NUM_COUNTER];
 };
 
+// Keep track of counters allocated
 struct bcpid_pmc_counter 
 {
     bool is_valid;
@@ -96,25 +140,35 @@ struct bcpid_pmc_counter
     const char *name;
 };
 
+// Represent a distinct object file (executable or dynamic library)
 struct bcpid_object 
 {
     const char *path;
     struct timespec last_modified;
     bcpi_hash hash;
+
+    // This has to be a map, because its ordinality is exploited 
+    // during compression
     map<uint64_t, struct bcpid_pc_node *> node_map; 
 
+    // Used during compression
     int tmp_archive_object_index;
 };
 
+// Represent a mapping inside a process
 struct bcpid_program_mapping 
 {
     uint64_t start;
     uint64_t end;
+    // offset of this section in the corresponding ELF file
     uint64_t file_offset;
     uint32_t protection;
     struct bcpid_object *obj;
 };
 
+// A routine to sort mappings according to their beginning address
+// to facilitate binary search
+// undefined behavior when mapping overlaps
 bool 
 bcpid_program_mapping_sort(const struct bcpid_program_mapping &me, 
         const struct bcpid_program_mapping &other) 
@@ -122,6 +176,7 @@ bcpid_program_mapping_sort(const struct bcpid_program_mapping &me,
     return me.start < other.start;
 }
 
+// Represent a distinct process
 struct bcpid_program 
 {
     int pid;
@@ -130,6 +185,7 @@ struct bcpid_program
 
 struct bcpid_pc_node;
 
+// An edge in a call chain graph
 struct bcpid_pc_edge 
 {
     uint64_t hits[BCPI_MAX_NUM_COUNTER];
@@ -137,16 +193,7 @@ struct bcpid_pc_edge
     struct bcpid_pc_node *to;
 };
 
-int g_bcpid_pc_edge_sort_counter_id;
-
-bool 
-bcpid_pc_edge_sort(const struct bcpid_pc_edge *me, 
-        const struct bcpid_pc_edge *other) 
-{ 
-    return me->hits[g_bcpid_pc_edge_sort_counter_id] > 
-        other->hits[g_bcpid_pc_edge_sort_counter_id]; 
-}
-
+// A vertex in a call chain graph
 struct bcpid_pc_node 
 {
     uint64_t value;
@@ -154,9 +201,12 @@ struct bcpid_pc_node
     struct bcpid_object *obj;
     uint64_t end_ctr[BCPI_MAX_NUM_COUNTER];
 
+    // Map downstream node to the edge between nodes, where
+    // counter numbers are actually stored
     unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge>
     incoming_edge_map;
 
+    // Used during compression
     int tmp_archive_node_index;
 };
 
@@ -166,6 +216,7 @@ extern const char *g_bcpid_debug_counter_name[];
 
 int g_quit;
 
+// various debug counters
 enum bcpid_debug_counter {
     bcpid_debug_empty_mapin_name,
     bcpid_debug_empty_mapping_pc,
@@ -180,13 +231,22 @@ enum bcpid_debug_counter {
     bcpid_debug_counter_max,
 };
 
+/* 
+ * Kernel objects are announced only once 
+ * by PMCLOG during program start up,
+ * therefore they need to be cached to
+ * facilitate garbage collection
+ */
 struct bcpid_kernel_object {
     string path;
     uint64_t start;
 };
 
+// Number of kqueue events batched in a 
+// single kqueue call
 #define BCPID_KEVENT_MAX_BATCH_SIZE 16
 
+// A cache entry for an object file 
 struct bcpid_hash_cache {
     struct timespec last_modified;
     bcpi_hash hash;
@@ -207,6 +267,10 @@ struct bcpid
 
     pthread_t pmclog_forward_thr;
 
+    /* Whether this is the first time 
+     * that we received call chain event from PMCLOG or not.
+     * Used for kernel object handling. (See replay_kernel_objects)
+     */
     bool first_callchain;
 
     uint64_t debug_counter[bcpid_debug_counter_max];
@@ -248,6 +312,11 @@ bcpid_debug_counter_increment(struct bcpid *b, enum bcpid_debug_counter ctr)
 {
     ++b->debug_counter[ctr];
 }
+
+/*
+ * Initialize an object. 
+ * Main objective is to calculate its hash
+ */
 
 void bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path) {
     obj->path = strdup(path);
@@ -317,6 +386,17 @@ void bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path) {
     }
 }
 
+/*
+ * Due to a possible HWPMC bug, event notification
+ * does not work when the pipe for PMCLOG is marked
+ * non-blocking. Non-blocking pipe is required for 
+ * main thread in order to handle tasks in addition
+ * to receiving from PMCLOG.
+ * As a work around, a separate thread with blocking
+ * pipe is spawned, and it forwards data to non-blocking
+ * end as is.
+ */
+
 void *
 bcpid_pmglog_thread_main(void *arg)
 {
@@ -348,6 +428,11 @@ bcpid_pmglog_thread_main(void *arg)
     return 0;
 }
 
+/*
+ * Print diagnostic information at program
+ * termination
+ */
+
 void 
 bcpid_report_pmc_ctr(struct bcpid *b) 
 {
@@ -360,6 +445,10 @@ bcpid_report_pmc_ctr(struct bcpid *b)
         MSG("%s: %ld", spec->name, spec->hits);
     }
 }
+
+/*
+ * Initialize object after receives MAP_IN event from PMCLOG
+ */
 
 void 
 bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev) 
@@ -375,6 +464,8 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
 
     string object_path;
 
+    // Path provided by PMCLOG is erroneous for kernel modules and kernel itself
+    // This is fixed by prepending top level path to kernel and modules
     if (!strcmp(path, "kernel") || strstr(path, ".ko")) {
         object_path = string(BCPID_KERNEL_PATH) + string(path);
     }
@@ -385,6 +476,12 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
 
     b->kernel_objects.push_back(ko);
 }
+
+/*
+ * Since a save to disk obliterates all in memory sample data and kernel
+ * objects are reported only once by PMCLOG, we need to re-establish
+ * them from caches.
+ */
 
 void 
 bcpid_replay_kernel_objects(struct bcpid *b) 
@@ -425,6 +522,10 @@ bcpid_replay_kernel_objects(struct bcpid *b)
             bcpid_program_mapping_sort);
 }
 
+/*
+ * Remove all in-memory sample data and tracking data
+ */
+
 void bcpid_garbage_collect(struct bcpid *b) {
     for (auto p: b->path_to_object) {
         bcpid_object *o = p.second;
@@ -450,6 +551,7 @@ void bcpid_garbage_collect(struct bcpid *b) {
     bcpid_replay_kernel_objects(b);
 }
 
+// Calculate number of active counters
 int
 bcpid_num_active_counter(struct bcpid *b)
 {
@@ -467,12 +569,18 @@ bcpid_num_active_counter(struct bcpid *b)
 
 void bcpid_stop_all(struct bcpid *);
 
+/*
+ * Save sample data on disk. All in-memory data
+ * are obliterated
+ */
+
 void
 bcpid_save(struct bcpid *b)
 {
     struct bcpi_record *record = (struct bcpi_record *)malloc(sizeof(*record));
     record->epoch = time(0);
 
+    // Embed system description in the file
     struct utsname uts;
     int status = uname(&uts);
     if (status < 0) {
@@ -513,7 +621,6 @@ bcpid_save(struct bcpid *b)
 
         ++num_object;
     }
-
 
     record->num_object = num_object;
     record->object_list = (struct bcpi_object *)
@@ -562,6 +669,13 @@ bcpid_save(struct bcpid *b)
                 struct bcpi_edge *re = &rn->edge_list[edge_index];
 
                 re->to = rn;
+                /* 
+                 * Temporarily use this field to hold pointer to
+                 * the originating node that is part of daemon 
+                 * data structure (as opposed to record data structure),
+                 * since the latter may not have been allocated yet.
+                 * Will be corrected during second pass.
+                 */
                 re->from = (struct bcpi_node *)edge->from; 
                 for (int i = 0; i < name_index; ++i) {
                     re->counters[i] = edge->hits[index_mapping[i]];
@@ -579,6 +693,10 @@ bcpid_save(struct bcpid *b)
             struct bcpi_node *rn = &ro->node_list[j];
             for (int k = 0; k < rn->num_incoming_edge; ++k) { 
                 struct bcpi_edge *re = &rn->edge_list[k];
+                /*
+                 * Here we correct this field to point to record data structure
+                 * using indexes that were set up during first pass
+                 */
                 struct bcpid_pc_node *node_from = (struct bcpid_pc_node *)
                     re->from;
 
@@ -633,15 +751,26 @@ void bcpid_program_mapping_dump(const vector<bcpid_program_mapping> &mappings) {
     }
 }
 
+/*
+ * Obtain pointer to the node, given a program counter and a process.
+ * This routine first finds the object that is mapped at that address,
+ * it then retreives the node, and creates one if necessary.
+ */
+
 struct bcpid_pc_node *
 bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc, 
         uint64_t pc) 
 {
+    // Until there is a better way to distinguish kernel address, 
+    // this is currently used. Note that '-1' is PMCLOG's way of 
+    // saying 'kernel processes', and is perpetuated here.
     if (pc > BCPID_KERN_BASE) {
        proc = b->pid_to_program[-1]; 
     }
 
     struct bcpid_program_mapping m = {pc, 0, 0, 0, 0};
+    // Upper bound performs binary search. It is assumed that
+    // there is no overlap in address spaces.
     auto it = upper_bound(proc->mappings.begin(), proc->mappings.end(), m, 
             bcpid_program_mapping_sort);
     if (it == proc->mappings.end()) {
@@ -661,13 +790,14 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc,
     }
     
     if (pc > mapping->end && proc->pid != -1) {
-
         bcpid_debug_counter_increment(b, bcpid_debug_pc_after_mapping);
         return 0;
     }
 
     struct bcpid_object *obj = mapping->obj;
     struct bcpid_pc_node *node;
+    // Turn raw program counter into an address that can be located
+    // in an ELF file. 
     uint64_t real_addr = pc - mapping->start + mapping->file_offset;
     auto nit = obj->node_map.find(real_addr);
     if (nit == obj->node_map.end()) {
@@ -684,6 +814,12 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc,
 
     return node;
 }
+
+/*
+ * Initialize and return pointer to the process structure. 
+ * Main objective is to read address space mappings and to create
+ * index for them using procstat API.
+ */
 
 struct bcpid_program *
 bcpid_init_proc(struct bcpid *b, int pid) 
@@ -733,6 +869,7 @@ bcpid_init_proc(struct bcpid *b, int pid)
         exec->mappings.emplace_back(m);
     }
 
+    // Sorting mappings allows binary search
     sort(exec->mappings.begin(), exec->mappings.end(), 
             bcpid_program_mapping_sort);
 
@@ -741,11 +878,19 @@ bcpid_init_proc(struct bcpid *b, int pid)
     return exec;    
 }
 
+// Get counter index using pointer arithmetic.
+
 int
 bcpid_get_pmc_counter_index(struct bcpid *b, struct bcpid_pmc_counter *c)
 {
     return c - b->pmc_ctrs; 
 }
+
+/*
+ * Handle a call chain event received from PMCLOG. Main objective
+ * is to walk the entire call chain, possibly creating vertices and 
+ * edges in the meantime, and increment counters along the way.
+ */
 
 void 
 bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev) 
@@ -833,6 +978,11 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
     }
 }
 
+/*
+ * Handle process exec event from PMCLOG. Main objective is to 
+ * initialize process data structure for tracking.
+ */
+
 void 
 bcpid_event_handler_proc_exec(struct bcpid *b, const struct pmclog_ev *ev) 
 {
@@ -870,6 +1020,10 @@ bcpid_event_handler_proc_create(struct bcpid *b, const struct pmclog_ev *ev)
 {
     const struct pmclog_ev_proccreate *pc = &ev->pl_u.pl_pc;
 }
+
+/*
+ * Handle process exit.
+ */
 
 void
 bcpid_event_handler_sysexit(struct bcpid *b, const struct pmclog_ev *ev)
@@ -916,6 +1070,10 @@ bcpid_register_handlers(struct bcpid *b)
     ev->handler = bcpid_event_handler_proc_fork;
 }
 
+/*
+ * A wrapper to batch kqueue event updates and to reduce number of calls to kqueue
+ */
+
 void 
 bcpid_kevent_set(struct bcpid *b, uintptr_t ident, short filter, u_short flags,
         u_int fflags, int64_t data, void *udata) 
@@ -938,6 +1096,10 @@ bcpid_pmc_init(struct bcpid *b)
         exit(1);
     }
 }
+
+/*
+ * Allocate a PMC counter on all CPUs.
+ */
 
 void
 bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
@@ -988,6 +1150,10 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 fail:
     return;
 }
+
+/*
+ * Release an allocated PMC counter on all CPUs.
+ */
 
 void
 bcpid_release_pmc(struct bcpid *b, const char *name, bool invalidate)
@@ -1099,6 +1265,7 @@ bcpid_setup_pmc(struct bcpid *b)
         SYSERROR("pthred_create: %s", strerror(status));
     }
 
+    // Read name of counters from argv, if present
     if (b->pmc_override) {
         char *pmc_name_cpy = strdup(b->default_pmc);
         const char *delim = ", ";
@@ -1117,6 +1284,8 @@ bcpid_setup_pmc(struct bcpid *b)
         PERROR("pmc_cpuinfo");
     }
 
+    // Read name of counters from configuration file named by CPU type 
+    // by default
     const char *cpu_name = pmc_name_of_cputype(cpuinfo->pm_cputype);
     const char *suffix = ".conf";
     char conf_name[128];
@@ -1124,6 +1293,7 @@ bcpid_setup_pmc(struct bcpid *b)
     strcpy(conf_name, "conf/");
     strcat(conf_name, cpu_name);
     strcat(conf_name, suffix);
+
     FILE *file = fopen(conf_name, "r");
     if (!file) {
         return;
@@ -1140,6 +1310,10 @@ bcpid_setup_pmc(struct bcpid *b)
 
     b->first_callchain = false;
 }
+
+/*
+ * PMCLOG event dispatcher
+ */
 
 void
 bcpid_handle_pmclog(struct bcpid *b)
@@ -1294,7 +1468,13 @@ uint64_t tv_to_sec(const struct timeval *r) {
     t += r->tv_sec * 1000000;
     t += r->tv_sec * 1000000;
     return t;
-} 
+}
+
+/*
+ * Periodically run piece of code. See BCPID_INTERVAL for period. 
+ * Currently it collects performance metrics of daemon, and
+ * save sample data to disk if they become too big.
+ */
 
 void bcpid_handle_timer(bcpid *b) {
     struct rusage r;
