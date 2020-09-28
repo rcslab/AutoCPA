@@ -309,21 +309,21 @@ static void dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsign
 	}
 }
 
-int search_symbol(const char *progname, const char *dbg_path, Dwarf_Addr address, string *dwarf_data)
+int search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 {
-    Dwarf_Debug dbg = 0;
-    Dwarf_Error err;
+    //Dwarf_Debug dbg = 0;
+    //Dwarf_Error err;
     int fd_elf = -1;
-    int fd_dwarf = -1;
-    Dwarf_Arange *aranges;
-    Dwarf_Signed cnt;
-    Dwarf_Error de;
+    //int fd_dwarf = -1;
+    //Dwarf_Arange *aranges;
+    //Dwarf_Signed cnt;
+    //Dwarf_Error de;
     Elf *e;
-    uint64_t pc;
-    Dwarf_Unsigned line_num;
-    string src_file, namedie, line_numstr;
-    Dwarf_Addr low, high;
-    int valid=1;
+    //uint64_t pc;
+    //Dwarf_Unsigned line_num;
+    //string src_file, namedie, line_numstr;
+    //Dwarf_Addr low, high;
+    //int valid=1;
 
     if (elf_version(EV_CURRENT) == EV_NONE)
         errx (EXIT_FAILURE, "ELF library initialization"
@@ -336,42 +336,42 @@ int search_symbol(const char *progname, const char *dbg_path, Dwarf_Addr address
     }
 
 
-    if ((fd_dwarf = open(dbg_path, O_RDONLY)) < 0) {
-        perror("open");
-        cerr<<"error in fd_dwarf"<<endl;
-        return 1;
-    }
+    // if ((fd_dwarf = open(dbg_path, O_RDONLY)) < 0) {
+    //     perror("open");
+    //     cerr<<"error in fd_dwarf"<<endl;
+    //     return 1;
+    // }
 
 
     if ((e = elf_begin(fd_elf , ELF_C_READ, NULL)) == NULL)
          errx (EXIT_FAILURE , "elf_begin() failed : %s." ,
                elf_errmsg (-1));
 
-    if (dwarf_init(fd_dwarf, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK) {
-        fprintf(stderr, "Failed DWARF initialization\n");
-        return 1;
-    }
+    // if (dwarf_init(fd_dwarf, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK) {
+    //     fprintf(stderr, "Failed DWARF initialization\n");
+    //     return 1;
+    // }
 
-    pc=change_offset(address, e);
+    *revised_addr=change_offset(address, e);
 
-    list_funcs_in_file(dbg, pc, &low, &high, &namedie, &valid);
+    //list_funcs_in_file(dbg, pc, &low, &high, &namedie, &valid);
 
-    dump_dw_line_sfile(dbg, pc, &line_num, &src_file);
+    //dump_dw_line_sfile(dbg, pc, &line_num, &src_file);
 
-    line_numstr = to_string(line_num);
-    *dwarf_data="src file name: "+src_file+" line num: "+line_numstr;
-    if (valid==0){
-      *dwarf_data = *dwarf_data +" name of subprogram: "+ namedie;
-    }
+    // line_numstr = to_string(line_num);
+    // *dwarf_data="src file name: "+src_file+" line num: "+line_numstr;
+    // if (valid==0){
+    //   *dwarf_data = *dwarf_data +" name of subprogram: "+ namedie;
+    // }
     //cout<<*dwarf_data<<endl;
-    if (dwarf_finish(dbg, &err) != DW_DLV_OK) {
-        fprintf(stderr, "Failed DWARF finalization\n");
-        return 1;
-    }
+    // if (dwarf_finish(dbg, &err) != DW_DLV_OK) {
+    //     fprintf(stderr, "Failed DWARF finalization\n");
+    //     return 1;
+    // }
 
     elf_end(e);
     close(fd_elf);
-    close(fd_dwarf);
+    //close(fd_dwarf);
 
     return 0;
 }

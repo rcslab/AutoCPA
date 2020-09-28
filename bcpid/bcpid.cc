@@ -1104,6 +1104,7 @@ bcpid_pmc_init(struct bcpid *b)
 void
 bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 {
+    //MSG("AAAA");
     struct bcpid_pmc_counter *ctr = 0;
     int counter_index = 0;
     for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
@@ -1121,7 +1122,7 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
         MSG("cannot add %s: all %d pmcs allocated", name, BCPI_MAX_NUM_COUNTER);
         return;
     }
-
+    //MSG("AAA");
     MSG("allocating %s", name);
 
     for (int i = 0; i < b->num_cpu; ++i) {
@@ -1297,14 +1298,17 @@ bcpid_setup_pmc(struct bcpid *b)
     FILE *file = fopen(conf_name, "r");
     if (!file) {
         return;
-    } 
+    }
+    //MSG("CCC");
     for (;;) {
         char ctr[128];
+        //MSG("DDD");
         char *s = fgets(ctr, 127, file);
         if (!s) {
             break;
         }
         ctr[strcspn(ctr, "\r\n")] = 0;
+        //MSG("BBB");
         bcpid_alloc_pmc(b, ctr, b->default_count);
     }
 

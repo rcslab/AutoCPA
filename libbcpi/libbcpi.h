@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <vector>
+#include <unordered_map>
+
 
 #define BCPI_SHA256_SIZE 32
 #define BCPI_MAX_NUM_COUNTER 16
@@ -15,7 +17,7 @@ extern "C" {
 #endif
 
 typedef uint32_t bcpi_hash;
-
+typedef struct bcpi_node bcpi_node;
 struct bcpi_function {
     const char *name;
     uint64_t begin_address;
@@ -28,7 +30,7 @@ struct bcpi_object {
 
     int num_function;
     struct bcpi_function *function_list;
-    
+
     int num_node;
     struct bcpi_node *node_list;
 
@@ -48,7 +50,7 @@ struct bcpi_edge {
 struct bcpi_node {
     struct bcpi_object *object;
     uint64_t node_address;
-    
+
     int num_incoming_edge;
     struct bcpi_edge *edge_list;
 
@@ -95,11 +97,14 @@ void bcpi_collect_node(struct bcpi_record *record, vector<struct bcpi_node *> &n
 
 void bcpi_node_sort(int, vector<struct bcpi_node*> &sorted_nodes);
 
-void bcpi_edge_sort(int index , vector<struct bcpi_edge*> &sorted_edges); 
+void bcpi_edge_sort(int index , vector<struct bcpi_edge*> &sorted_edges);
 
 void bcpi_collect_object(struct bcpi_record *record, vector<struct bcpi_object *> &object_out, const char *name);
 
 void bcpi_collect_node_from_object(struct bcpi_record *record, vector<struct bcpi_node *> &node_out, struct bcpi_object *ro);
 
-#endif
+std::vector<bcpi_node *> hash2vec(unordered_map<uint64_t, bcpi_node *> umap);
 
+std::vector<bcpi_node *> vec2hash_merge_nodes(int index, std::vector<bcpi_node *> nodes);
+
+#endif
