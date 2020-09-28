@@ -10,6 +10,7 @@
 #include <sys/utsname.h>
 
 #include <vector>
+#include <unordered_map>
 #include <algorithm>
 
 #include <zlib.h>
@@ -22,9 +23,9 @@
 using namespace std;
 
 struct bcpi_serializer {
-    int max_size; 
+    int max_size;
     int size;
-    int read_cursor; 
+    int read_cursor;
     int overflow: 1;
     int underflow: 1;
     int read_mode: 1;
@@ -38,8 +39,8 @@ struct bcpi_serializer {
  * Allocate space.
  */
 
-void 
-bcpi_serializer_init(struct bcpi_serializer *b) 
+void
+bcpi_serializer_init(struct bcpi_serializer *b)
 {
     b->size = 0;
     b->max_size = BCPI_SERIALIZER_FIRST_SIZE;
@@ -63,8 +64,8 @@ bcpi_serilizer_finish(struct bcpi_serializer *b)
  * arbitrary binary data. Does not allocate space.
  */
 
-void 
-bcpi_serializer_init_read(struct bcpi_serializer *b, char *data, int size) 
+void
+bcpi_serializer_init_read(struct bcpi_serializer *b, char *data, int size)
 {
     b->size = size;
     b->max_size = size;
@@ -75,32 +76,32 @@ bcpi_serializer_init_read(struct bcpi_serializer *b, char *data, int size)
     b->data = data;
 }
 
-void 
-bcpi_serializer_set_size(struct bcpi_serializer *b, int size) 
+void
+bcpi_serializer_set_size(struct bcpi_serializer *b, int size)
 {
-    b->size = size; 
+    b->size = size;
 }
 
-int 
-bcpi_serializer_get_size(struct bcpi_serializer *b) 
+int
+bcpi_serializer_get_size(struct bcpi_serializer *b)
 {
     return b->size;
 }
 
 void *
-bcpi_serializer_get_write_cursor(struct bcpi_serializer *b) 
+bcpi_serializer_get_write_cursor(struct bcpi_serializer *b)
 {
     return &b->data[b->size];
 }
 
 void *
-bcpi_serializer_get_read_cursor(struct bcpi_serializer *b) 
+bcpi_serializer_get_read_cursor(struct bcpi_serializer *b)
 {
     return &b->data[b->read_cursor];
 }
 
 void *
-bcpi_serializer_get_data(struct bcpi_serializer *b) 
+bcpi_serializer_get_data(struct bcpi_serializer *b)
 {
     return b->data;
 }
@@ -110,8 +111,8 @@ bcpi_serializer_get_data(struct bcpi_serializer *b)
  * written. Update interval state overflow if allocation failed.
  */
 
-void 
-bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size) 
+void
+bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size)
 {
     if (b->overflow) {
         return;
@@ -136,8 +137,8 @@ bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size)
  *
  */
 
-void 
-bcpi_serializer_check_get(struct bcpi_serializer *b, int item_size) 
+void
+bcpi_serializer_check_get(struct bcpi_serializer *b, int item_size)
 {
     if (b->underflow) {
         return;
@@ -149,8 +150,8 @@ bcpi_serializer_check_get(struct bcpi_serializer *b, int item_size)
     }
 }
 
-void 
-bcpi_serializer_add_bytes(struct bcpi_serializer *b, const void *data, 
+void
+bcpi_serializer_add_bytes(struct bcpi_serializer *b, const void *data,
         int size) {
     bcpi_serializer_check_add(b, size);
     if (b->overflow) {
@@ -160,7 +161,7 @@ bcpi_serializer_add_bytes(struct bcpi_serializer *b, const void *data,
     b->size += size;
 }
 
-void 
+void
 bcpi_serializer_get_bytes(struct bcpi_serializer *b, void *data, int size)
 {
     bcpi_serializer_check_get(b, size);
@@ -171,32 +172,32 @@ bcpi_serializer_get_bytes(struct bcpi_serializer *b, void *data, int size)
     b->read_cursor += size;
 }
 
-void 
-bcpi_serializer_add_uint64(struct bcpi_serializer *b, uint64_t i) 
+void
+bcpi_serializer_add_uint64(struct bcpi_serializer *b, uint64_t i)
 {
     bcpi_serializer_add_bytes(b, &i, sizeof(i));
 }
 
-void 
-bcpi_serializer_add_int64(struct bcpi_serializer *b, int64_t i) 
+void
+bcpi_serializer_add_int64(struct bcpi_serializer *b, int64_t i)
 {
     bcpi_serializer_add_bytes(b, &i, sizeof(i));
 }
 
-void 
-bcpi_serializer_add_int32(struct bcpi_serializer *b, int32_t i) 
+void
+bcpi_serializer_add_int32(struct bcpi_serializer *b, int32_t i)
 {
     bcpi_serializer_add_bytes(b, &i, sizeof(i));
 }
 
-void 
-bcpi_serializer_add_int24(struct bcpi_serializer *b, int32_t i) 
+void
+bcpi_serializer_add_int24(struct bcpi_serializer *b, int32_t i)
 {
     bcpi_serializer_add_bytes(b, &i, 3);
 }
 
-void 
-bcpi_serializer_add_int8(struct bcpi_serializer *b, int8_t i) 
+void
+bcpi_serializer_add_int8(struct bcpi_serializer *b, int8_t i)
 {
     int item_size = sizeof(i);
     bcpi_serializer_check_add(b, item_size);
@@ -206,8 +207,8 @@ bcpi_serializer_add_int8(struct bcpi_serializer *b, int8_t i)
     b->data[b->size++] = i;
 }
 
-void 
-bcpi_serializer_add_uint8(struct bcpi_serializer *b, uint8_t i) 
+void
+bcpi_serializer_add_uint8(struct bcpi_serializer *b, uint8_t i)
 {
     int item_size = sizeof(i);
     bcpi_serializer_check_add(b, item_size);
@@ -217,8 +218,8 @@ bcpi_serializer_add_uint8(struct bcpi_serializer *b, uint8_t i)
     b->data[b->size++] = i;
 }
 
-int8_t 
-bcpi_serializer_get_int8(struct bcpi_serializer *b) 
+int8_t
+bcpi_serializer_get_int8(struct bcpi_serializer *b)
 {
     int8_t r = 0;
     int item_size = sizeof(r);
@@ -230,8 +231,8 @@ bcpi_serializer_get_int8(struct bcpi_serializer *b)
     return r;
 }
 
-uint8_t 
-bcpi_serializer_get_uint8(struct bcpi_serializer *b) 
+uint8_t
+bcpi_serializer_get_uint8(struct bcpi_serializer *b)
 {
     uint8_t r = 0;
     int item_size = sizeof(r);
@@ -243,32 +244,32 @@ bcpi_serializer_get_uint8(struct bcpi_serializer *b)
     return r;
 }
 
-int64_t 
-bcpi_serializer_get_int64(struct bcpi_serializer *b) 
+int64_t
+bcpi_serializer_get_int64(struct bcpi_serializer *b)
 {
     int64_t r = 0;
     bcpi_serializer_get_bytes(b, &r, sizeof(r));
     return r;
 }
 
-int32_t 
-bcpi_serializer_get_int32(struct bcpi_serializer *b) 
+int32_t
+bcpi_serializer_get_int32(struct bcpi_serializer *b)
 {
     int32_t r = 0;
     bcpi_serializer_get_bytes(b, &r, sizeof(r));
     return r;
 }
 
-int32_t 
-bcpi_serializer_get_int24(struct bcpi_serializer *b) 
+int32_t
+bcpi_serializer_get_int24(struct bcpi_serializer *b)
 {
     int32_t r = 0;
     bcpi_serializer_get_bytes(b, &r, 3);
     return r;
 }
 
-void 
-bcpi_serializer_add_string(struct bcpi_serializer *b, const char *str) 
+void
+bcpi_serializer_add_string(struct bcpi_serializer *b, const char *str)
 {
     int len = strlen(str)+1;
     bcpi_serializer_check_add(b, len+sizeof(len));
@@ -288,7 +289,7 @@ bcpi_serializer_add_string(struct bcpi_serializer *b, const char *str)
 char *
 bcpi_serializer_get_string(struct bcpi_serializer *b)
 {
-    unsigned int len = bcpi_serializer_get_uint8(b); 
+    unsigned int len = bcpi_serializer_get_uint8(b);
     if (b->underflow) {
         return 0;
     }
@@ -309,7 +310,7 @@ struct bcpi_object_info {
     uint8_t function_size_bits;
     uint8_t node_chain_bits;
     uint8_t node_num_edge_bits;
-    uint8_t counter_bits[BCPI_MAX_NUM_COUNTER]; 
+    uint8_t counter_bits[BCPI_MAX_NUM_COUNTER];
 };
 
 #define BCPI_CLZ(_v) (!(_v) ? sizeof(_v)*8 : __builtin_clz(_v))
@@ -321,7 +322,7 @@ bcpi_function_compare(const void *a, const void *b)
 {
     struct bcpi_function *f1 = (struct bcpi_function *)a;
     struct bcpi_function *f2 = (struct bcpi_function *)b;
-    
+
     if (f1->begin_address < f2->begin_address) {
         return -1;
     }
@@ -361,7 +362,7 @@ bcpi_node_compare(const void *a, const void *b)
 #define BCPI_CHECK_EQUAL(_a, _b) \
     if ((_a) != (_b)) { \
         BCPI_IS_EQUAL_FAIL(#_a); \
-    } 
+    }
 
 bool
 bcpi_is_equal(struct bcpi_record *a, struct bcpi_record *b)
@@ -379,8 +380,8 @@ bcpi_is_equal(struct bcpi_record *a, struct bcpi_record *b)
 
     BCPI_CHECK_EQUAL(a->num_object, b->num_object);
     for (int i = 0; i < a->num_object; ++i) {
-        struct bcpi_object *roa = &a->object_list[i]; 
-        struct bcpi_object *rob = &b->object_list[i]; 
+        struct bcpi_object *roa = &a->object_list[i];
+        struct bcpi_object *rob = &b->object_list[i];
 
         BCPI_CHECK_EQUAL(roa->num_function, rob->num_function);
         BCPI_CHECK_EQUAL(roa->num_node, rob->num_node);
@@ -419,7 +420,7 @@ bcpi_is_equal(struct bcpi_record *a, struct bcpi_record *b)
                                  rnb->terminal_counters[k]);
             }
 
-            for (int k = 0; k < rna->num_incoming_edge; ++k) { 
+            for (int k = 0; k < rna->num_incoming_edge; ++k) {
                 struct bcpi_edge *rea = &rna->edge_list[k];
                 struct bcpi_edge *reb = &rnb->edge_list[k];
 
@@ -447,17 +448,17 @@ bcpi_free(struct bcpi_record *record)
     free(record->counter_name);
 
     for (int i = 0; i < record->num_object; ++i) {
-        struct bcpi_object *ro = &record->object_list[i]; 
+        struct bcpi_object *ro = &record->object_list[i];
         free((void *)ro->path);
 
         for (int j = 0; j < ro->num_function; ++j) {
-            struct bcpi_function *function = &ro->function_list[j]; 
+            struct bcpi_function *function = &ro->function_list[j];
             free((void *)function->name);
         }
 
         free(ro->function_list);
 
-        for (int j = 0; j < ro->num_node; ++j) { 
+        for (int j = 0; j < ro->num_node; ++j) {
             struct bcpi_node *rn = &ro->node_list[j];
 
             free(rn->edge_list);
@@ -487,7 +488,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 
         uint64_t function_chain_max = 0;
         uint64_t function_size_max = 0;
-        
+
         uint64_t prev_function_end = 0;
         uint64_t function_first_addr, node_first_addr;
 
@@ -495,7 +496,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 
         for (int j = 0; j < object->num_function; ++j) {
             struct bcpi_function *function = &object->function_list[j];
-            
+
             uint64_t function_size = function->end_address -
                 function->begin_address;
             function_size_max = MAX(function_size, function_size_max);
@@ -504,7 +505,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
                 function_first_addr = function->begin_address;
             } else {
                 uint64_t chain_next = function->begin_address -
-                    prev_function_end; 
+                    prev_function_end;
                 function_chain_max = MAX(function_chain_max, chain_next);
             }
 
@@ -554,7 +555,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
         oi->node_chain_bits = BCPI_LOG2(node_chain_max);
         oi->node_num_edge_bits = BCPI_LOG2(node_num_edge_max);
         oi->function_first_addr = function_first_addr;
-        oi->node_first_addr = node_first_addr; 
+        oi->node_first_addr = node_first_addr;
 
         for (int j = 0; j < record->num_counter; ++j) {
             oi->counter_bits[j] = BCPI_LOG2(counter_maximum[j]);
@@ -562,7 +563,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
     }
 
     int object_id_bits = BCPI_LOG2(record->num_object);
-    int node_id_bits = BCPI_LOG2(num_node_max); 
+    int node_id_bits = BCPI_LOG2(num_node_max);
 
     struct bcpi_serializer _builder;
     struct bcpi_serializer *builder = &_builder;
@@ -581,19 +582,19 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
      * number of bits for node ID: 1 byte
      * number of objects: 3 bytes
      * array of objects: (one after the other without gaps)
-     *      path to object: variable length string 
+     *      path to object: variable length string
      *      hash of object (crc32): 4 bytes
      *      number of functions: 3 bytes
      *      number of nodes: 3 bytes
      *      object info: see struct bcpi_object_info. it is
-     *          written to the stream as is, except last member counter_bits 
-     *          where only the actual number of counters is written 
+     *          written to the stream as is, except last member counter_bits
+     *          where only the actual number of counters is written
      *      array of functions:
      *          currently unused
      *      array of nodes: (one after the other without gaps)
-     *          offset of next node's address relative to current: node_chain_bits/8 bytes 
+     *          offset of next node's address relative to current: node_chain_bits/8 bytes
      *          bit vector denoting non-zero counter values: num_counter/8 bytes
-     *          array of counter values: (one after the other without gaps, 
+     *          array of counter values: (one after the other without gaps,
      *          containing n values where n is number of non-zero bits in the bit vector)
      *              each counter is represented as counter_bits[i]/8 bytes
      *          number of edges: node_num_edge_bits/8 bytes
@@ -601,11 +602,11 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
      *              source object index: object_id_bits/8 bytes
      *              source node index in that object: node_id_bits/8 bytes
      *              bit vector denoting non-zero counter values: num_counter/8 bytes
-     *              array of counter values: (one after the other without gaps, 
+     *              array of counter values: (one after the other without gaps,
      *              containing n values where n is number of non-zero bits in the bit vector)
      *                  each counter is represented as counter_bits[i]/8 bytes
      *
-     * The whole stream is then compressed with libz      
+     * The whole stream is then compressed with libz
      */
 
     bcpi_serializer_add_int64(builder, record->epoch);
@@ -618,7 +619,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
     bcpi_serializer_add_int8(builder, node_id_bits);
     bcpi_serializer_add_int24(builder, record->num_object);
     for (int i = 0; i < record->num_object; ++i) {
-        struct bcpi_object *ro = &record->object_list[i]; 
+        struct bcpi_object *ro = &record->object_list[i];
         struct bcpi_object_info *oi = &object_info[i];
         bcpi_serializer_add_string(builder, ro->path);
         bcpi_serializer_add_bytes(builder, &ro->hash, sizeof(ro->hash));
@@ -630,12 +631,12 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
         bcpi_serializer_add_bytes(builder, oi, counter_bytes);
 
         for (int j = 0; j < ro->num_function; ++j) {
-            struct bcpi_function *function = &ro->function_list[j]; 
+            struct bcpi_function *function = &ro->function_list[j];
         }
 
         for (int j = 0; j < ro->num_node; ++j) {
             struct bcpi_node *rn = &ro->node_list[j];
-            
+
             uint64_t next_node_value = 0;
             if (j < ro->num_node - 1) {
                 next_node_value = ro->node_list[j+1].node_address -
@@ -664,7 +665,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
             bcpi_serializer_add_bytes(builder, &rn->num_incoming_edge,
                 BCPI_CEIL_DIV(oi->node_num_edge_bits, 8));
 
-            for (int k = 0; k < rn->num_incoming_edge; ++k) { 
+            for (int k = 0; k < rn->num_incoming_edge; ++k) {
                 struct bcpi_edge *re = &rn->edge_list[k];
                 bcpi_serializer_add_bytes(builder,
                     &re->from->object->object_index,
@@ -676,7 +677,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
                     if (re->counters[l]) {
                         counter_nz_flag |= 1 << l;
                     }
-                } 
+                }
 
                 bcpi_serializer_add_bytes(builder, &counter_nz_flag,
                     BCPI_CEIL_DIV(record->num_counter, 8));
@@ -699,8 +700,8 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 
     uint64_t bound = compressBound(raw_data_size);
     char *compressed = (char *)malloc(bound+header_size);
-    int status = compress((unsigned char *)compressed+header_size, &bound, 
-            (unsigned char *)bcpi_serializer_get_data(builder), 
+    int status = compress((unsigned char *)compressed+header_size, &bound,
+            (unsigned char *)bcpi_serializer_get_data(builder),
             (uint64_t)raw_data_size);
     assert(status == Z_OK);
 
@@ -711,10 +712,10 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
     memcpy(compressed, &header, header_size);
 
     *buffer = compressed;
-    *size = bound + header_size; 
+    *size = bound + header_size;
     fprintf(stderr, "%d/%d/%d/%d object/function/node/edge processed, "
             "%ld (%d) bytes\n",
-            record->num_object, num_function, num_node, num_edge, 
+            record->num_object, num_function, num_node, num_edge,
             bound, raw_data_size);
 }
 
@@ -725,11 +726,11 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
         compressed_buffer;
     int header_size = sizeof(struct bcpi_archive_header);
 
-    uint64_t raw_size = header->size; 
+    uint64_t raw_size = header->size;
     char *buffer = (char *)malloc(raw_size);
-    int status = uncompress((unsigned char *)buffer, &raw_size, 
+    int status = uncompress((unsigned char *)buffer, &raw_size,
             (unsigned char *)compressed_buffer+header_size, size-header_size);
-    assert(status == Z_OK); 
+    assert(status == Z_OK);
 
     struct bcpi_serializer _reader;
     struct bcpi_serializer *reader= &_reader;
@@ -753,7 +754,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
     record->object_list = (struct bcpi_object *)
         malloc(sizeof(*record->object_list)*record->num_object);
     for (int i = 0; i < record->num_object; ++i) {
-        struct bcpi_object *ro = &record->object_list[i]; 
+        struct bcpi_object *ro = &record->object_list[i];
         ro->internal = 0;
         ro->object_index = i;
 
@@ -767,7 +768,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
         int counter_bytes = sizeof(*oi)-sizeof(oi->counter_bits)+
             sizeof(oi->counter_bits[0])*record->num_counter;
         bcpi_serializer_get_bytes(reader, oi, counter_bytes);
-        
+
         if (!ro->num_function) {
             ro->function_list = 0;
         } else {
@@ -776,7 +777,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
         }
 
         for (int j = 0; j < ro->num_function; ++j) {
-            struct bcpi_function *function = &ro->function_list[j]; 
+            struct bcpi_function *function = &ro->function_list[j];
         }
 
         ro->node_list = (struct bcpi_node *)
@@ -787,7 +788,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
             rn->internal = 0;
             rn->node_index = j;
             rn->object = ro;
-            
+
             if (!j) {
                 rn->node_address = oi->node_first_addr;
             }
@@ -818,7 +819,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
             rn->num_incoming_edge = num_edge;
             rn->edge_list = (struct bcpi_edge *)
                 malloc(sizeof(*rn->edge_list)*rn->num_incoming_edge);
-            for (int k = 0; k < rn->num_incoming_edge; ++k) { 
+            for (int k = 0; k < rn->num_incoming_edge; ++k) {
                 struct bcpi_edge *re = &rn->edge_list[k];
                 re->internal = 0;
                 int object_index = 0;
@@ -828,7 +829,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
                     BCPI_CEIL_DIV(object_id_bits, 8));
                 bcpi_serializer_get_bytes(reader, &node_index,
                     BCPI_CEIL_DIV(node_id_bits, 8));
-                
+
                 re->from = (struct bcpi_node *)(uint64_t)object_index;
                 re->to = (struct bcpi_node *)(uint64_t)node_index;
 
@@ -851,9 +852,9 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
         struct bcpi_object *ro = &record->object_list[i];
         for (int j = 0; j < ro->num_node; ++j) {
             struct bcpi_node *rn = &ro->node_list[j];
-            for (int k = 0; k < rn->num_incoming_edge; ++k) { 
+            for (int k = 0; k < rn->num_incoming_edge; ++k) {
                 struct bcpi_edge *re = &rn->edge_list[k];
-                int object_index = (uint64_t)re->from; 
+                int object_index = (uint64_t)re->from;
                 int node_index = (uint64_t)re->to;
 
                 re->to = rn;
@@ -870,7 +871,7 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
 
 int bcpi_save_file(const struct bcpi_record *r, const char *f) {
     char *data;
-    int size; 
+    int size;
     int ret = -1;
 
     bcpi_save(r, &data, &size);
@@ -905,7 +906,7 @@ int bcpi_load_file(const char *f, struct bcpi_record **r) {
         perror("fopen");
         return -1;
     }
-    
+
     fseek(file, 0, SEEK_END);
     uint64_t size = ftell(file);
     fseek(file, 0, SEEK_SET);
@@ -936,9 +937,11 @@ int bcpi_merge(struct bcpi_record **out, const struct bcpi_record **list,
 }
 
 int bcpi_get_index_from_name(struct bcpi_record *record, const char *name) {
+
     for (int i = 0; i < record->num_counter; ++i) {
         if (!strcmp(record->counter_name[i], name)) {
             return i;
+
         }
     }
     return -1;
@@ -949,7 +952,7 @@ int g_bcpi_sort_index;
 bool bcpi_node_sort_function(const struct bcpi_node *a,
                              const struct bcpi_node *b) {
     return a->terminal_counters[g_bcpi_sort_index] >
-        b->terminal_counters[g_bcpi_sort_index]; 
+        b->terminal_counters[g_bcpi_sort_index];
 }
 
 bool bcpi_edge_sort_function(const struct bcpi_edge *a,
@@ -961,10 +964,10 @@ void bcpi_collect_node(struct bcpi_record *record,
                        vector<struct bcpi_node *> &node_out) {
     for (int i = 0; i < record->num_object; ++i) {
         struct bcpi_object *ro = &record->object_list[i];
-        
+
         for (int j = 0; j < ro->num_node; ++j) {
-            struct bcpi_node *rn = &ro->node_list[j]; 
-            
+            struct bcpi_node *rn = &ro->node_list[j];
+
             node_out.emplace_back(rn);
         }
     }
@@ -986,9 +989,9 @@ void bcpi_collect_node_from_object(struct bcpi_record *record,
                                    vector<struct bcpi_node *> &node_out,
                                    struct bcpi_object *ro) {
     for (int i = 0; i < ro->num_node; ++i) {
-        struct bcpi_node *rn = &ro->node_list[i]; 
+        struct bcpi_node *rn = &ro->node_list[i];
         node_out.push_back(rn);
-    } 
+    }
 }
 
 void bcpi_collect_edge(struct bcpi_node *n,
@@ -998,12 +1001,12 @@ void bcpi_collect_edge(struct bcpi_node *n,
     }
 }
 
-void bcpi_node_sort(int index, vector<struct bcpi_node*> &sorted_nodes) {   
+void bcpi_node_sort(int index, vector<struct bcpi_node*> &sorted_nodes) {
     g_bcpi_sort_index = index;
     sort(sorted_nodes.begin(), sorted_nodes.end(), bcpi_node_sort_function);
 }
 
-void bcpi_edge_sort(int index, vector<struct bcpi_edge*> &sorted_edges) {   
+void bcpi_edge_sort(int index, vector<struct bcpi_edge*> &sorted_edges) {
     g_bcpi_sort_index = index;
     sort(sorted_edges.begin(), sorted_edges.end(), bcpi_edge_sort_function);
 }
@@ -1030,8 +1033,8 @@ void bcpi_print_summary(const struct bcpi_record *r) {
 
 void bcpi_show_node_info(struct bcpi_record *r, struct bcpi_node *n,
                          const char *sort_crit) {
-    printf("Node ID %d in object ID %d\n", n->node_index,
-           n->object->object_index);
+    printf("\nNode ID %d in object ID %d\n", n->node_index,
+           (n->object->object_index)+1);
     printf("Address %lx in %s\n", n->node_address, n->object->path);
     printf(" Counter hits (as terminal node):\n");
     for (int i = 0; i < r->num_counter; ++i) {
@@ -1048,15 +1051,37 @@ void bcpi_show_node_info(struct bcpi_record *r, struct bcpi_node *n,
         sort(edges.begin(), edges.end(), bcpi_edge_sort_function);
     }
 
-    printf(" Callchain reaching this node (exclude above):\n");
-    int edge_size = edges.size();
-    for (int i = 0; i < edge_size; ++i) {
-        struct bcpi_edge *e = edges[i];
-        printf(" %lx in %s\n", e->from->node_address, e->from->object->path);
-        for (int j = 0; j < r->num_counter; ++j) {
-            printf(" %8ld", e->counters[j]);
-        }
-        printf("\n");
-    }
+    //printf(" Callchain reaching this node (exclude above):\n");
+    //int edge_size = edges.size();
+    //for (int i = 0; i < edge_size; ++i) {
+    //    struct bcpi_edge *e = edges[i];
+    //    printf(" %lx in %s\n", e->from->node_address, e->from->object->path);
+    //    for (int j = 0; j < r->num_counter; ++j) {
+    //        printf(" %8ld", e->counters[j]);
+    //    }
+    //    printf("\n");
+    //}
 }
 
+
+vector<bcpi_node *> hash2vec(unordered_map<uint64_t, bcpi_node *> umap){
+  unordered_map<uint64_t, bcpi_node *>:: iterator itr;
+  vector<bcpi_node *> new_nodes;
+  for (itr = umap.begin(); itr != umap.end(); itr++){
+    new_nodes.push_back(itr->second);
+    // cout << hex<<itr->first << "  " << dec<<itr->second->terminal_counters[0] << endl;
+  }
+  return new_nodes;
+}
+
+
+vector<bcpi_node *> vec2hash_merge_nodes(int index, vector<bcpi_node *> nodes){
+  unordered_map<uint64_t, bcpi_node *> umap;
+  for (int i=0; i<nodes.size(); i++){
+      if (umap.find(nodes[i]->node_address) == umap.end())
+        umap.insert(make_pair(nodes[i]->node_address, nodes[i]));
+      else
+        umap[nodes[i]->node_address]->terminal_counters[index] += nodes[i]->terminal_counters[index];
+  }
+  return hash2vec(umap);
+}
