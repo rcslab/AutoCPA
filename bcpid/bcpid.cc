@@ -1006,13 +1006,11 @@ bcpid_event_handler_proc_exec(struct bcpid *b, const struct pmclog_ev *ev)
 void
 bcpid_event_handler_proc_fork(struct bcpid *b, const struct pmclog_ev *ev)
 {
-	const struct pmclog_ev_procfork *pf = &ev->pl_u.pl_f;
 }
 
 void
 bcpid_event_handler_proc_create(struct bcpid *b, const struct pmclog_ev *ev)
 {
-	const struct pmclog_ev_proccreate *pc = &ev->pl_u.pl_pc;
 }
 
 /*
@@ -1482,10 +1480,18 @@ void
 bcpid_handle_timer(bcpid *b)
 {
 	struct rusage r;
-	int status = getrusage(RUSAGE_SELF, &r);
-	uint64_t new_time = tv_to_sec(&r.ru_utime) + tv_to_sec(&r.ru_stime);
-	uint64_t old_time = tv_to_sec(&b->last_usage.ru_utime) + tv_to_sec(&b->last_usage.ru_stime);
-	uint64_t time_diff = new_time - old_time;
+	int status;
+	uint64_t new_time, old_time, time_diff;
+
+	status = getrusage(RUSAGE_SELF, &r);
+	if (status != 0) {
+		PERROR("getrusage");
+		abort();
+	}
+
+	new_time = tv_to_sec(&r.ru_utime) + tv_to_sec(&r.ru_stime);
+	old_time = tv_to_sec(&b->last_usage.ru_utime) + tv_to_sec(&b->last_usage.ru_stime);
+	time_diff = new_time - old_time;
 	/*
 	fprintf(stderr, "%f\n", (double)time_diff/(double)1000000);
 
@@ -1589,7 +1595,8 @@ void bcpid_term_handler(int);
 void
 bcpid_parse_global_config(struct bcpid *b)
 {
-	FILE *f = fopen("conf/global.conf", "r");
+	MSG("bcpid_parse_global_config() is unimplemented");
+	abort();
 }
 
 bool
@@ -1681,7 +1688,6 @@ void
 bcpid_printcpu()
 {
 	int status;
-	int ncpus = pmc_ncpu();
 	const struct pmc_cpuinfo *cpuinfo;
 
 	status = pmc_cpuinfo(&cpuinfo);
@@ -1724,7 +1730,6 @@ void
 bcpid_print_pmcs()
 {
 	int status;
-	int ncpu = pmc_ncpu();
 	int npmcs = pmc_npmc(0);
 	struct pmc_pmcinfo *pmcinfo;
 
@@ -1748,7 +1753,6 @@ void
 bcpid_print_events()
 {
 	int status;
-	int ncpus = pmc_ncpu();
 	const struct pmc_cpuinfo *cpuinfo;
 
 	status = pmc_cpuinfo(&cpuinfo);

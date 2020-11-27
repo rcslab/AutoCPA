@@ -631,10 +631,6 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 			sizeof(oi->counter_bits[0])*record->num_counter;
 		bcpi_serializer_add_bytes(builder, oi, counter_bytes);
 
-		for (int j = 0; j < ro->num_function; ++j) {
-			struct bcpi_function *function = &ro->function_list[j];
-		}
-
 		for (int j = 0; j < ro->num_node; ++j) {
 			struct bcpi_node *rn = &ro->node_list[j];
 
@@ -774,10 +770,6 @@ bcpi_load(char *compressed_buffer, int size, struct bcpi_record **r)
 		} else {
 			ro->function_list = (struct bcpi_function *)
 				malloc(sizeof(*ro->function_list)*ro->num_function);
-		}
-
-		for (int j = 0; j < ro->num_function; ++j) {
-			struct bcpi_function *function = &ro->function_list[j];
 		}
 
 		ro->node_list = (struct bcpi_node *)

@@ -329,10 +329,9 @@ Debug_PrintHex(const std::string &data, off_t off, size_t limit)
 void
 Debug_PrintBacktrace()
 {
+#ifdef HAVE_EXECINFO
 	const size_t MAX_FRAMES = 128;
 	void *array[MAX_FRAMES];
-
-#ifdef HAVE_EXECINFO
 	int num = backtrace(array, MAX_FRAMES);
 	char **names = backtrace_symbols(array, num);
 	for (int i = 0; i < num; i++) {
@@ -347,10 +346,9 @@ Debug_PrintBacktrace()
 void
 Debug_LogBacktrace()
 {
+#ifdef HAVE_EXECINFO
 	const size_t MAX_FRAMES = 128;
 	void *array[MAX_FRAMES];
-
-#ifdef HAVE_EXECINFO
 	int num = backtrace(array, MAX_FRAMES);
 	char **names = backtrace_symbols(array, num);
 	for (int i = 0; i < num; i++) {
