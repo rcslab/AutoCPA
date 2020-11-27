@@ -1,5 +1,5 @@
 PROG_CXX=bcpiutil
-SRCS=	bcpiutil find_an_address.cpp ../libbcpi/libbcpi.cc ../libbcpi/crc32.c
+SRCS=	bcpiutil find_an_address.cc ../libbcpi/libbcpi.cc ../libbcpi/crc32.c
 
 LDADD= -lz -ldwarf -lelf
 

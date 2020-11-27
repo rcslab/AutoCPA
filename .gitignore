@@ -1,0 +1,7 @@
+*.o
+*.debug
+*.full
+.depend
+
+/bcpid/bcpid
+/bcpiutil/bcpiutil

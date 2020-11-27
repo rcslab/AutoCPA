@@ -4,13 +4,12 @@
 #include <vector>
 #include <unordered_map>
 
-
 #define BCPI_SHA256_SIZE 32
 #define BCPI_MAX_NUM_COUNTER 16
 
 using namespace std;
 
-#if defined(__cplusplus)
+#ifdef __cplusplus
 
 extern "C" {
 
@@ -19,61 +18,61 @@ extern "C" {
 typedef uint32_t bcpi_hash;
 typedef struct bcpi_node bcpi_node;
 struct bcpi_function {
-    const char *name;
-    uint64_t begin_address;
-    uint64_t end_address;
+	const char *name;
+	uint64_t begin_address;
+	uint64_t end_address;
 };
 
 struct bcpi_object {
-    const char *path;
-    bcpi_hash hash;
+	const char *path;
+	bcpi_hash hash;
 
-    int num_function;
-    struct bcpi_function *function_list;
+	int num_function;
+	struct bcpi_function *function_list;
 
-    int num_node;
-    struct bcpi_node *node_list;
+	int num_node;
+	struct bcpi_node *node_list;
 
-    int object_index;
-    uint64_t internal;
+	int object_index;
+	uint64_t internal;
 };
 
 struct bcpi_edge {
-    struct bcpi_node *to;
-    struct bcpi_node *from;
+	struct bcpi_node *to;
+	struct bcpi_node *from;
 
-    uint64_t counters[BCPI_MAX_NUM_COUNTER];
+	uint64_t counters[BCPI_MAX_NUM_COUNTER];
 
-    uint64_t internal;
+	uint64_t internal;
 };
 
 struct bcpi_node {
-    struct bcpi_object *object;
-    uint64_t node_address;
+	struct bcpi_object *object;
+	uint64_t node_address;
 
-    int num_incoming_edge;
-    struct bcpi_edge *edge_list;
+	int num_incoming_edge;
+	struct bcpi_edge *edge_list;
 
-    uint64_t terminal_counters[BCPI_MAX_NUM_COUNTER];
+	uint64_t terminal_counters[BCPI_MAX_NUM_COUNTER];
 
-    int node_index;
-    uint64_t internal;
+	int node_index;
+	uint64_t internal;
 };
 
 struct bcpi_record {
-    const char *system_name;
-    uint64_t epoch;
+	const char *system_name;
+	uint64_t epoch;
 
-    int num_counter;
-    const char **counter_name;
+	int num_counter;
+	const char **counter_name;
 
-    int num_object;
-    struct bcpi_object *object_list;
+	int num_object;
+	struct bcpi_object *object_list;
 };
 
 struct bcpi_archive_header {
-    uint32_t identifier;
-    uint32_t size;
+	uint32_t identifier;
+	uint32_t size;
 };
 
 void bcpi_save(const struct bcpi_record *, char **, int *);
@@ -87,8 +86,7 @@ void bcpi_print_summary(const struct bcpi_record *r);
 int bcpi_merge(struct bcpi_record **out, const struct bcpi_record **list, int num);
 void bcpi_show_node_info(struct bcpi_record *r, struct bcpi_node *, const char *sort_criteria);
 
-#if defined(__cplusplus)
-
+#ifdef __cplusplus
 }
 
 void bcpi_collect_edge(struct bcpi_node *n, vector<struct bcpi_edge *> &edge_out);

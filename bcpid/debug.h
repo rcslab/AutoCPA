@@ -24,13 +24,13 @@
 
 #include <functional>
 
-#define LEVEL_SYS       0 /* Assert/Panic/Abort/NotImplemented */
-#define LEVEL_ERR       1 /* Error */
-#define LEVEL_WRN       2 /* Warning */
-#define LEVEL_MSG       3 /* Stdout */
-#define LEVEL_LOG       4 /* Log */
-#define LEVEL_DBG       5 /* Debug */
-#define LEVEL_VRB       6 /* Verbose */
+#define LEVEL_SYS 0 /* Assert/Panic/Abort/NotImplemented */
+#define LEVEL_ERR 1 /* Error */
+#define LEVEL_WRN 2 /* Warning */
+#define LEVEL_MSG 3 /* Stdout */
+#define LEVEL_LOG 4 /* Log */
+#define LEVEL_DBG 5 /* Debug */
+#define LEVEL_VRB 6 /* Verbose */
 
 /*
  * Remove all logging in PERF builds
@@ -58,46 +58,67 @@
 #endif
 
 #ifdef BCPID_DEBUG
-#define ASSERT(_x) \
-    if (!(_x)) { \
-        Debug_Log(LEVEL_SYS, "ASSERT("#_x"): %s %s:%d\n", \
-                __FUNCTION__, __FILE__, __LINE__); \
-        assert(_x); \
-    }
+#define ASSERT(_x)							\
+	do {								\
+		if (!(_x)) {						\
+			Debug_Log(LEVEL_SYS, "ASSERT(" #_x "): %s %s:%d\n", \
+				  __FUNCTION__, __FILE__, __LINE__);	\
+			assert(_x);					\
+		}							\
+	} while (0)
 #else
-#define ASSERT(_x)
+#define ASSERT(_x) ((void)0)
 #endif
 
 #ifdef _WIN32
-#define PANIC() { Debug_Log(LEVEL_SYS, "PANIC: " \
-                         "function %s, file %s, line %d\n", \
-                         __FUNCTION__, __FILE__, __LINE__); abort(); }
-#define NOT_IMPLEMENTED(_x) if (!(_x)) { Debug_Log(LEVEL_SYS, \
-                                "NOT_IMPLEMENTED(" #_x "): %s %s:%d\n", \
-                                __FUNCTION__, __FILE__, __LINE__); abort(); }
-#define NOT_REACHED() { Debug_Log(LEVEL_SYS, "NOT_REACHED: " \
-                         "function %s, file %s, line %d\n", \
-                         __FUNCTION__, __FILE__, __LINE__); abort(); }
+#define PANIC()								\
+	do {								\
+		Debug_Log(LEVEL_SYS, "PANIC: function %s, file %s, line %d\n", \
+			  __FUNCTION__, __FILE__, __LINE__);		\
+		abort();						\
+	} while (0)
+#define NOT_IMPLEMENTED(_x)						\
+	do {								\
+		if (!(_x)) {						\
+			Debug_Log(LEVEL_SYS, "NOT_IMPLEMENTED(" #_x "): %s %s:%d\n", \
+				  __FUNCTION__, __FILE__, __LINE__);	\
+			abort();					\
+		}							\
+	} while (0)
+#define NOT_REACHED()							\
+	do {								\
+		Debug_Log(LEVEL_SYS, "NOT_REACHED: function %s, file %s, line %d\n", \
+			  __FUNCTION__, __FILE__, __LINE__);		\
+		abort();                               \
+	} while (0)
 #else /* _WIN32 */
-#define PANIC() { Debug_Log(LEVEL_SYS, "PANIC: " \
-                         "function %s, file %s, line %d\n", \
-                         __func__, __FILE__, __LINE__); abort(); }
-#define NOT_IMPLEMENTED(_x) if (!(_x)) { Debug_Log(LEVEL_SYS, \
-                                "NOT_IMPLEMENTED(" #_x "): %s %s:%d\n", \
-                                __func__, __FILE__, __LINE__); abort(); }
-#define NOT_REACHED() { Debug_Log(LEVEL_SYS, "NOT_REACHED: " \
-                         "function %s, file %s, line %d\n", \
-                         __FUNCTION__, __FILE__, __LINE__); abort(); \
-                         __builtin_unreachable(); }
+#define PANIC()								\
+	do {								\
+		Debug_Log(LEVEL_SYS, "PANIC: function %s, file %s, line %d\n", \
+			  __func__, __FILE__, __LINE__);		\
+		abort();						\
+	} while (0)
+#define NOT_IMPLEMENTED(_x)						\
+	do {								\
+		if (!(_x)) {						\
+			Debug_Log(LEVEL_SYS, "NOT_IMPLEMENTED(" #_x "): %s %s:%d\n", \
+				  __func__, __FILE__, __LINE__);	\
+			abort();					\
+		}							\
+	} while (0)
+#define NOT_REACHED()							\
+	do {								\
+		Debug_Log(LEVEL_SYS, "NOT_REACHED: function %s, file %s, line %d\n", \
+			  __FUNCTION__, __FILE__, __LINE__);		\
+		abort();						\
+		__builtin_unreachable();				\
+	} while (0)
 #endif /* _WIN32 */
 
 int Debug_OpenLog(const std::string &logPath);
-void Debug_Log(int level, const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));
+void Debug_Log(int level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 void Debug_Perror(const char *fmt, int err);
-void Debug_PrintHex(const std::string &data,
-                       off_t off = 0,
-                       size_t limit = 0);
+void Debug_PrintHex(const std::string &data, off_t off = 0, size_t limit = 0);
 void Debug_PrintBacktrace();
 void Debug_LogBacktrace();
 
@@ -105,4 +126,3 @@ void Debug_AddOutput(void *handle, std::function<void(const std::string &)> func
 void Debug_RemoveOutput(void *handle);
 
 #endif /* __BCPID_DEBUG_H__ */
-
