@@ -1612,7 +1612,7 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
 
 	while (c) {
-		c = getopt(argc, (char **)argv, "hc:p:l:o:");
+		c = getopt(argc, (char **)argv, "hc:p:lo:");
 		if (c == -1) {
 			break;
 		}
@@ -1626,7 +1626,7 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 				"(Number of counter increments between interrupt)\n"
 				"  -h (Show this help)\n"
 				"  -p pmc[, ...] list of pmc to monitor\n"
-				"  -o dir output to dir"
+				"  -o dir output to dir\n"
 				"  -l (List names of PMCs)\n");
 			return false;
 			break;
