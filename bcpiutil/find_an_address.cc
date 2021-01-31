@@ -21,7 +21,6 @@
 
 #include "find_an_address.h"
 
-using namespace std;
 
 struct section {
 	const char *name;    /* section name */
@@ -150,7 +149,7 @@ change_offset(uint64_t num, Elf *e)
 /* List a function if it's in the given DIE.
 */
 void
-list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die,Dwarf_Addr address, Dwarf_Addr *low_pc, Dwarf_Addr *high_pc, string *diename, int *valid)
+list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die, Dwarf_Addr address, Dwarf_Addr *low_pc, Dwarf_Addr *high_pc, std::string *diename, int *valid)
 {
 	char* die_name = 0;
 	const char* tag_name = 0;
@@ -162,30 +161,30 @@ list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die,Dwarf_Addr address, Dwarf_Ad
 	int rc = dwarf_diename(the_die, &die_name, &err);
 
 	if (rc == DW_DLV_ERROR)
-		cout<<"Error in dwarf_diename"<<endl;
+		std::cout << "Error in dwarf_diename\n";
 	else if (rc == DW_DLV_NO_ENTRY)
 		return;
 
 	if (dwarf_tag(the_die, &tag, &err) != DW_DLV_OK)
-		cout<<"Error in dwarf_tag"<<endl;
+		std::cout << "Error in dwarf_tag\n";
 
 	/* Only interested in subprogram DIEs here */
 	if (tag != DW_TAG_subprogram)
 		return;
 
 	if (dwarf_get_TAG_name(tag, &tag_name) != DW_DLV_OK)
-		cout<<"Error in dwarf_get_TAG_name"<<endl;
+		std::cout << "Error in dwarf_get_TAG_name\n";
 
 	// printf("DW_TAG_subprogram: '%s'\n", die_name);
 
 	/* Grab the DIEs attributes for display */
 	if (dwarf_attrlist(the_die, &attrs, &attrcount, &err) != DW_DLV_OK)
-		cout<<"Error in dwarf_attlist"<<endl;
+		std::cout << "Error in dwarf_attlist\n";
 
 	for (i = 0; i < attrcount; ++i) {
 		Dwarf_Half attrcode;
 		if (dwarf_whatattr(attrs[i], &attrcode, &err) != DW_DLV_OK)
-			cout<<"Error in dwarf_whatattr"<<endl;
+			std::cout << "Error in dwarf_whatattr\n";
 
 		/* We only take some of the attributes for display here.
 		** More can be picked with appropriate tag constants.
@@ -212,7 +211,7 @@ list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die,Dwarf_Addr address, Dwarf_Ad
 /* List all the functions from the file represented by the given descriptor.
 */
 void
-list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_Addr *high, string *namedie, int *valid)
+list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_Addr *high, std::string *namedie, int *valid)
 {
 	Dwarf_Unsigned cu_header_length, abbrev_offset, next_cu_header;
 	Dwarf_Half version_stamp, address_size;
@@ -221,7 +220,7 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 
 	while (1) {
 		/* Find a compilation unit header */
-		// cerr<<"haha"<<endl;
+		// cerr << "haha\n";
 		int temp;
 		temp= dwarf_next_cu_header(
 			dbg,
@@ -232,19 +231,19 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 			&next_cu_header,
 			&err);
 		if (temp==DW_DLV_ERROR)
-			cout<<"Error reading DWARF cu header"<<endl;
+			std::cout << "Error reading DWARF cu header\n";
 		if (temp==DW_DLV_NO_ENTRY){
-			// cerr<<"here we are at the end of all CUs"<<endl;
+			// cerr << "here we are at the end of all CUs\n";
 			break;
 		}
 
 		/* Find the CU DIE of current CU */
 		if (dwarf_siblingof(dbg, no_die, &cu_die, &err) == DW_DLV_ERROR)
-			cout<<"Error getting sibling of CU"<<endl;
+			std::cout << "Error getting sibling of CU\n";
 
 		/* Expect the CU DIE to have children- children at level 1 */
 		if (dwarf_child(cu_die, &child_die, &err) == DW_DLV_ERROR)
-			cout<<"Error getting child of CU DIE"<<endl;
+			std::cout << "Error getting child of CU DIE\n";
 
 		/* Now go over all children DIEs */
 		while (1) {
@@ -254,7 +253,7 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 			rc = dwarf_siblingof(dbg, child_die, &child_die, &err);
 
 			if (rc == DW_DLV_ERROR)
-				cout<<"Error getting sibling of DIE"<<endl;
+				std::cout << "Error getting sibling of DIE\n";
 			else if (rc == DW_DLV_NO_ENTRY)
 				break; /* done */
 		}
@@ -262,7 +261,7 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 }
 
 static void
-dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num, string *src_file)
+dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num, std::string *src_file)
 {
 	Dwarf_Die die;
 	Dwarf_Line *linebuf, ln;
@@ -333,13 +332,13 @@ search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 
 	if ((fd_elf = open(progname, O_RDONLY)) < 0) {
 		perror("open");
-		cerr<<"error in fd_elf"<<endl;
+		std::cerr << "error in fd_elf\n";
 		return 1;
 	}
 
 	// if ((fd_dwarf = open(dbg_path, O_RDONLY)) < 0) {
 	//     perror("open");
-	//     cerr<<"error in fd_dwarf"<<endl;
+	//     std::cerr << "error in fd_dwarf\n";
 	//     return 1;
 	// }
 
@@ -363,7 +362,7 @@ search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 	// if (valid==0){
 	//   *dwarf_data = *dwarf_data +" name of subprogram: "+ namedie;
 	// }
-	//cout<<*dwarf_data<<endl;
+	// std::cout << *dwarf_data << "\n";
 	// if (dwarf_finish(dbg, &err) != DW_DLV_OK) {
 	//     fprintf(stderr, "Failed DWARF finalization\n");
 	//     return 1;

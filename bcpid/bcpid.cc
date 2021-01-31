@@ -33,8 +33,6 @@
 #include "../libbcpi/libbcpi.h"
 #include "../libbcpi/crc32.h"
 
-using namespace std;
-
 /*
  * Set up signal handlers so that the program doesn't get
  * terminated right away and has a chance to handle signals.
@@ -149,7 +147,7 @@ struct bcpid_object
 
 	// This has to be a map, because its ordinality is exploited
 	// during compression
-	map<uint64_t, struct bcpid_pc_node *> node_map;
+	std::map<uint64_t, struct bcpid_pc_node *> node_map;
 
 	// Used during compression
 	int tmp_archive_object_index;
@@ -180,7 +178,7 @@ bcpid_program_mapping_sort(const struct bcpid_program_mapping &me,
 struct bcpid_program
 {
 	int pid;
-	vector<struct bcpid_program_mapping> mappings;
+	std::vector<struct bcpid_program_mapping> mappings;
 };
 
 struct bcpid_pc_node;
@@ -203,7 +201,7 @@ struct bcpid_pc_node
 
 	// Map downstream node to the edge between nodes, where
 	// counter numbers are actually stored
-	unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge>
+	std::unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge>
 	incoming_edge_map;
 
 	// Used during compression
@@ -238,7 +236,7 @@ enum bcpid_debug_counter {
  * facilitate garbage collection
  */
 struct bcpid_kernel_object {
-	string path;
+	std::string path;
 	uint64_t start;
 };
 
@@ -284,23 +282,23 @@ struct bcpid
 	struct kevent kevent_in_batch[BCPID_KEVENT_MAX_BATCH_SIZE];
 	struct kevent kevent_out_batch[BCPID_KEVENT_MAX_BATCH_SIZE];
 
-	unordered_map<pmc_id_t, struct bcpid_pmc_counter *> pmcid_to_counter;
-	unordered_map<int, struct bcpid_program *> pid_to_program;
-	unordered_map<string, struct bcpid_object *> path_to_object;
+	std::unordered_map<pmc_id_t, struct bcpid_pmc_counter *> pmcid_to_counter;
+	std::unordered_map<int, struct bcpid_program *> pid_to_program;
+	std::unordered_map<std::string, struct bcpid_object *> path_to_object;
 
 	int default_count;
 	const char *default_pmc;
 	const char *default_output_dir;
 	bool pmc_override;
 
-	vector<bcpid_kernel_object> kernel_objects;
+	std::vector<bcpid_kernel_object> kernel_objects;
 
 	struct rusage last_usage;
 
 	int num_node;
 	int num_edge;
 
-	unordered_map<string, bcpid_hash_cache> object_hash_cache;
+	std::unordered_map<std::string, bcpid_hash_cache> object_hash_cache;
 
 	int node_collect_threshold;
 	int edge_collect_threshold;
@@ -335,7 +333,7 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 
 	obj->last_modified = s.st_mtim;
 
-	auto oit = b->object_hash_cache.find(string(path));
+	auto oit = b->object_hash_cache.find(std::string(path));
 	if (oit != b->object_hash_cache.end()) {
 		bcpid_hash_cache * cache = &oit->second;
 		if (!memcmp(&cache->last_modified, &obj->last_modified,
@@ -380,7 +378,7 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 		cache.last_modified = s.st_mtim;
 		cache.hash = hash;
 
-		b->object_hash_cache.emplace(make_pair(string(path), cache));
+		b->object_hash_cache.emplace(std::string(path), cache);
 	} else {
 		oit->second.hash = hash;
 		oit->second.last_modified = s.st_mtim;
@@ -460,12 +458,12 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
 		return;
 	}
 
-	string object_path;
+	std::string object_path;
 
 	// Path provided by PMCLOG is erroneous for kernel modules and kernel itself
 	// This is fixed by prepending top level path to kernel and modules
 	if (!strcmp(path, "kernel") || strstr(path, ".ko")) {
-		object_path = string(BCPID_KERNEL_PATH) + string(path);
+		object_path = std::string(BCPID_KERNEL_PATH) + std::string(path);
 	}
 
 	bcpid_kernel_object ko;
@@ -489,7 +487,7 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 	if (pit == b->pid_to_program.end()) {
 		proc = new struct bcpid_program;
 		proc->pid = pid;
-		b->pid_to_program.emplace(make_pair(pid, proc));
+		b->pid_to_program.emplace(pid, proc);
 	} else {
 		proc = pit->second;
 	}
@@ -500,7 +498,7 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 		if (oit == b->path_to_object.end()) {
 			obj = new struct bcpid_object;
 			bcpid_object_init(b, obj, ko.path.c_str());
-			b->path_to_object.emplace(make_pair(ko.path, obj));
+			b->path_to_object.emplace(ko.path, obj);
 		} else {
 			obj = oit->second;
 		}
@@ -742,7 +740,7 @@ bcpid_save(struct bcpid *b)
 }
 
 void
-bcpid_program_mapping_dump(const vector<bcpid_program_mapping> &mappings)
+bcpid_program_mapping_dump(const std::vector<bcpid_program_mapping> &mappings)
 {
 	for (const bcpid_program_mapping &m: mappings) {
 		fprintf(stderr, "%lx, %lx, %lx, %x\n", m.start, m.end, m.file_offset,
@@ -805,7 +803,7 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc,
 		node->value = real_addr;
 		node->obj = obj;
 
-		obj->node_map.emplace(make_pair(real_addr, node));
+		obj->node_map.emplace(real_addr, node);
 	} else {
 		node = nit->second;
 	}
@@ -845,13 +843,13 @@ bcpid_init_proc(struct bcpid *b, int pid)
 			break;
 		}
 
-		string path(cur_vm->kve_path);
+		std::string path(cur_vm->kve_path);
 		auto oit = b->path_to_object.find(path);
 		struct bcpid_object *obj;
 		if (oit == b->path_to_object.end()) {
 			obj = new struct bcpid_object;
 			bcpid_object_init(b, obj, cur_vm->kve_path);
-			b->path_to_object.insert(make_pair(path, obj));
+			b->path_to_object.emplace(path, obj);
 		} else {
 			obj = oit->second;
 		}
@@ -912,7 +910,7 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 				bcpid_debug_callchain_proc_init_fail);
 			return;
 		}
-		b->pid_to_program.emplace(make_pair(pid, proc));
+		b->pid_to_program.emplace(pid, proc);
 	} else {
 		proc = it->second;
 	}
@@ -963,7 +961,7 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 			edge.to = to_node;
 
 			b->num_edge++;
-			auto res = map->insert(make_pair(from_node, edge));
+			auto res = map->emplace(from_node, edge);
 			e = &res.first->second;
 		} else {
 			e = &eit->second;
@@ -983,7 +981,7 @@ bcpid_event_handler_proc_exec(struct bcpid *b, const struct pmclog_ev *ev)
 	const struct pmclog_ev_procexec *pe = &ev->pl_u.pl_x;
 	const char *main_object_path = pe->pl_pathname;
 
-	auto oit = b->path_to_object.find(string(main_object_path));
+	auto oit = b->path_to_object.find(std::string(main_object_path));
 	if (oit == b->path_to_object.end()) {
 		return;
 	}
@@ -1131,7 +1129,7 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 		}
 
 		cpu->pmcs[counter_index] = pmc_id;
-		b->pmcid_to_counter.insert(make_pair(pmc_id, ctr));
+		b->pmcid_to_counter.emplace(pmc_id, ctr);
 	}
 
 	ctr->is_valid = true;

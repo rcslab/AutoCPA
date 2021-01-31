@@ -17,18 +17,14 @@
 #include "../libbcpi/libbcpi.h"
 #include "../libbcpi/crc32.h"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 
 #define BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH "/usr/lib/debug"
 
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-
-using namespace std;
-
 struct util_query_parameter {
-	vector<const char *> file_names;
+	std::vector<const char *> file_names;
 	//const char *file_name;
 	const char *counter_name;
 	// object files containing this string in their names will be included for traversal
@@ -49,7 +45,7 @@ struct util_query_parameter {
 void
 util_print_spaces(int n)
 {
-    printf("%*c", n, ' ');
+	printf("%*c", n, ' ');
 }
 
 /*
@@ -104,14 +100,14 @@ get_revised_addr(const char *object_path, uint64_t offset)
 	return 0;
 }
 
-string
+std::string
 util_get_object_path(const char *str)
 {
-	const string debug_ext = ".debug";
-	string debug_file_path = string(BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH) + string(str) + debug_ext;
+	const std::string debug_ext = ".debug";
+	std::string debug_file_path = std::string(BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH) + std::string(str) + debug_ext;
 	struct stat s;
 	if (stat(debug_file_path.c_str(), &s) == -1) {
-		return string(str);
+		return std::string(str);
 	}
 	return debug_file_path;
 }
@@ -119,10 +115,10 @@ util_get_object_path(const char *str)
 void
 util_traverse(struct util_query_parameter *u, int cur_level, struct bcpi_node *n)
 {
-	vector<struct bcpi_edge *> edges;
+	std::vector<struct bcpi_edge *> edges;
 	bcpi_collect_edge(n, edges);
 	bcpi_edge_sort(u->counter_index, edges);
-	int traverse_node = MIN((int)edges.size(), u->top_n_edge);
+	int traverse_node = std::min((int)edges.size(), u->top_n_edge);
 	for (int i = 0; i < traverse_node; ++i) {
 		struct bcpi_edge *e = edges[i];
 		struct bcpi_node *from = e->from;
@@ -133,7 +129,7 @@ util_traverse(struct util_query_parameter *u, int cur_level, struct bcpi_node *n
 		util_print_spaces(cur_level);
 		printf("<- %ld : %lx (%s) ", value, from->node_address, from->object->path);
 
-		string debug_info = util_get_object_path(from->object->path);
+		std::string debug_info = util_get_object_path(from->object->path);
 		//cout << check_addr(from->object->path, debug_info.c_str(), from->node_address) << endl;
 		if (uitl_check_recurse_condition(u, cur_level + 1, from)) {
 			util_traverse(u, cur_level + 1, from);
@@ -186,11 +182,11 @@ util_process(struct util_query_parameter *u)
 		return;
 	}
 
-	vector<struct bcpi_node *> nodes;
-	vector<struct bcpi_record *> records;
+	std::vector<struct bcpi_node *> nodes;
+	std::vector<struct bcpi_record *> records;
 	for (size_t i = 0; i < u->file_names.size() ; i++) {
 
-		vector<struct bcpi_object *> objects;
+		std::vector<struct bcpi_object *> objects;
 		struct bcpi_record * record;
 		bcpi_load_file(u->file_names[i], &record);
 		records.push_back(record);
@@ -215,8 +211,8 @@ util_process(struct util_query_parameter *u)
 	//call node merge here
 	nodes=vec2hash_merge_nodes(u->counter_index, nodes);
 	bcpi_node_sort(u->counter_index, nodes);
-	int traverse_node = MIN(u->top_n_node, (int)nodes.size());
-	string filename="address_info.csv";
+	int traverse_node = std::min(u->top_n_node, (int)nodes.size());
+	std::string filename="address_info.csv";
 	FILE *f = fopen(filename.c_str(), "w");
 	if (!f) {
 		perror("fopen");
@@ -321,7 +317,7 @@ main(int argc, char **argv)
 		return 0;
 	}
 
-	cout<<"size of file name vector: "<<util_conf->file_names.size()<<endl;
+	std::cout << "size of file name vector: " << util_conf->file_names.size() << "\n";
 	//cout<<"print vector file name: "<<util_conf->file_names[0]<<endl;
 	//cout<<"print vector file name: "<<util_conf->file_names[1]<<endl;
 	util_process(util_conf);

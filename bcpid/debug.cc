@@ -44,8 +44,6 @@
 
 #include "debug.h"
 
-using namespace std;
-
 /********************************************************************
  *
  *
@@ -135,10 +133,10 @@ Debug_Log(int level, const char *fmt, ...)
 
 #ifdef BCPID_DEBUG
 	if (level <= LEVEL_MSG)
-		cerr << buf;
+		std::cerr << buf;
 #else /* RELEASE or PERF */
 	if (level <= LEVEL_ERR)
-		cerr << buf + off;
+		std::cerr << buf + off;
 #endif
 
 	// Rolling buffer of the last N messages
@@ -249,7 +247,7 @@ Debug_SigHandler(int signum)
 }
 
 int
-Debug_OpenLog(const string &logPath)
+Debug_OpenLog(const std::string &logPath)
 {
 	if (logPath == "")
 		return -1;
@@ -259,7 +257,7 @@ Debug_OpenLog(const string &logPath)
 	signal(SIGSEGV, Debug_SigHandler);
 	signal(SIGILL, Debug_SigHandler);
 
-	logStream.open(logPath.c_str(), fstream::in | fstream::out | fstream::app);
+	logStream.open(logPath.c_str(), std::fstream::in | std::fstream::out | std::fstream::app);
 	if (!logStream.is_open()) {
 		printf("Could not open logfile: %s\n", logPath.c_str());
 		return -1;

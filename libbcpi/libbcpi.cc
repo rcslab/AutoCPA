@@ -17,11 +17,6 @@
 
 #include "libbcpi.h"
 
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-
-using namespace std;
-
 struct bcpi_serializer {
 	int max_size;
 	int size;
@@ -500,14 +495,14 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 
 			uint64_t function_size = function->end_address -
 				function->begin_address;
-			function_size_max = MAX(function_size, function_size_max);
+			function_size_max = std::max(function_size, function_size_max);
 
 			if (!j) {
 				function_first_addr = function->begin_address;
 			} else {
 				uint64_t chain_next = function->begin_address -
 					prev_function_end;
-				function_chain_max = MAX(function_chain_max, chain_next);
+				function_chain_max = std::max(function_chain_max, chain_next);
 			}
 
 			prev_function_end = function->end_address;
@@ -518,25 +513,25 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 		uint64_t prev_node_addr = 0;
 		int node_num_edge_max = 0;
 
-		num_node_max = MAX(num_node_max, object->num_node);
+		num_node_max = std::max(num_node_max, object->num_node);
 		num_node += object->num_node;
 
 		for (int j = 0; j < object->num_node; ++j) {
 			struct bcpi_node *node = &object->node_list[j];
 
-			node_num_edge_max = MAX(node_num_edge_max, node->num_incoming_edge);
+			node_num_edge_max = std::max(node_num_edge_max, node->num_incoming_edge);
 			if (!j) {
 				node_first_addr = node->node_address;
 			} else {
 				uint64_t chain_next = node->node_address - prev_node_addr;
-				node_chain_max = MAX(node_chain_max, chain_next);
+				node_chain_max = std::max(node_chain_max, chain_next);
 			}
 			prev_node_addr = node->node_address;
 
 			num_edge += node->num_incoming_edge;
 
 			for (int k = 0; k < record->num_counter; ++k) {
-				counter_maximum[k] = MAX(counter_maximum[k],
+				counter_maximum[k] = std::max(counter_maximum[k],
 					node->terminal_counters[k]);
 			}
 
@@ -544,7 +539,7 @@ bcpi_save(const struct bcpi_record *record, char **buffer, int *size)
 				struct bcpi_edge *edge = &node->edge_list[k];
 
 				for (int l = 0; l < record->num_counter; ++l) {
-					counter_maximum[l] = MAX(counter_maximum[l],
+					counter_maximum[l] = std::max(counter_maximum[l],
 						edge->counters[l]);
 				}
 			}
@@ -957,7 +952,7 @@ bcpi_edge_sort_function(const struct bcpi_edge *a, const struct bcpi_edge *b)
 }
 
 void
-bcpi_collect_node(struct bcpi_record *record, vector<struct bcpi_node *> &node_out)
+bcpi_collect_node(struct bcpi_record *record, std::vector<struct bcpi_node *> &node_out)
 {
 	for (int i = 0; i < record->num_object; ++i) {
 		struct bcpi_object *ro = &record->object_list[i];
@@ -972,7 +967,7 @@ bcpi_collect_node(struct bcpi_record *record, vector<struct bcpi_node *> &node_o
 
 void
 bcpi_collect_object(struct bcpi_record *record,
-	vector<struct bcpi_object *> &object_out,
+	std::vector<struct bcpi_object *> &object_out,
 	const char *name)
 {
 	for (int i = 0; i < record->num_object; ++i) {
@@ -986,7 +981,7 @@ bcpi_collect_object(struct bcpi_record *record,
 
 void
 bcpi_collect_node_from_object(struct bcpi_record *record,
-	vector<struct bcpi_node *> &node_out,
+	std::vector<struct bcpi_node *> &node_out,
 	struct bcpi_object *ro)
 {
 	for (int i = 0; i < ro->num_node; ++i) {
@@ -996,7 +991,7 @@ bcpi_collect_node_from_object(struct bcpi_record *record,
 }
 
 void
-bcpi_collect_edge(struct bcpi_node *n, vector<struct bcpi_edge *> &edge_out)
+bcpi_collect_edge(struct bcpi_node *n, std::vector<struct bcpi_edge *> &edge_out)
 {
 	for (int i = 0; i < n->num_incoming_edge; ++i) {
 		edge_out.emplace_back(&n->edge_list[i]);
@@ -1004,14 +999,14 @@ bcpi_collect_edge(struct bcpi_node *n, vector<struct bcpi_edge *> &edge_out)
 }
 
 void
-bcpi_node_sort(int index, vector<struct bcpi_node*> &sorted_nodes)
+bcpi_node_sort(int index, std::vector<struct bcpi_node*> &sorted_nodes)
 {
 	g_bcpi_sort_index = index;
 	sort(sorted_nodes.begin(), sorted_nodes.end(), bcpi_node_sort_function);
 }
 
 void
-bcpi_edge_sort(int index, vector<struct bcpi_edge*> &sorted_edges)
+bcpi_edge_sort(int index, std::vector<struct bcpi_edge*> &sorted_edges)
 {
 	g_bcpi_sort_index = index;
 	sort(sorted_edges.begin(), sorted_edges.end(), bcpi_edge_sort_function);
@@ -1052,7 +1047,7 @@ bcpi_show_node_info(struct bcpi_record *r, struct bcpi_node *n,
 	}
 	printf("\n");
 
-	vector<struct bcpi_edge *> edges;
+	std::vector<struct bcpi_edge *> edges;
 	bcpi_collect_edge(n, edges);
 	if (sort_crit) {
 		int index = bcpi_get_index_from_name(r, sort_crit);
@@ -1073,11 +1068,11 @@ bcpi_show_node_info(struct bcpi_record *r, struct bcpi_node *n,
 	//}
 }
 
-vector<bcpi_node *>
-hash2vec(unordered_map<uint64_t, bcpi_node *> umap)
+std::vector<bcpi_node *>
+hash2vec(std::unordered_map<uint64_t, bcpi_node *> umap)
 {
-	unordered_map<uint64_t, bcpi_node *>:: iterator itr;
-	vector<bcpi_node *> new_nodes;
+	std::unordered_map<uint64_t, bcpi_node *>:: iterator itr;
+	std::vector<bcpi_node *> new_nodes;
 	for (itr = umap.begin(); itr != umap.end(); itr++){
 		new_nodes.push_back(itr->second);
 		// cout << hex<<itr->first << "  " << dec<<itr->second->terminal_counters[0] << endl;
@@ -1086,13 +1081,13 @@ hash2vec(unordered_map<uint64_t, bcpi_node *> umap)
 }
 
 
-vector<bcpi_node *>
-vec2hash_merge_nodes(int index, vector<bcpi_node *> nodes)
+std::vector<bcpi_node *>
+vec2hash_merge_nodes(int index, std::vector<bcpi_node *> nodes)
 {
-	unordered_map<uint64_t, bcpi_node *> umap;
+	std::unordered_map<uint64_t, bcpi_node *> umap;
 	for (int i=0; i<nodes.size(); i++){
 		if (umap.find(nodes[i]->node_address) == umap.end())
-			umap.insert(make_pair(nodes[i]->node_address, nodes[i]));
+			umap.emplace(nodes[i]->node_address, nodes[i]);
 		else
 			umap[nodes[i]->node_address]->terminal_counters[index] += nodes[i]->terminal_counters[index];
 	}
