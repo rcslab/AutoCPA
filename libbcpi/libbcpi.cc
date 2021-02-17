@@ -438,6 +438,7 @@ void
 bcpi_free(struct bcpi_record *record)
 {
 	free((void *)record->system_name);
+
 	for (int i = 0; i < record->num_counter; ++i) {
 		free((void *)record->counter_name[i]);
 	}

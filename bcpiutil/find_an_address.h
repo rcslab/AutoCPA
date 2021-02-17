@@ -16,4 +16,3 @@ void list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dw
 
 int search_addr(const char* progname, Dwarf_Addr address, uint64_t *revised_addr);
 
-
