@@ -5,6 +5,7 @@
 #include <strings.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <sysexits.h>
 
 #include <sys/stat.h>
 #include <sys/event.h>
@@ -1597,10 +1598,23 @@ bcpid_parse_global_config(struct bcpid *b)
 	abort();
 }
 
+static void
+usage()
+{
+	fprintf(stderr, "Usage: bcpid [-c count] [-p pmc] [-o dir]\n"
+		        "\t-c count -- Sampling interval\n"
+			"\t-h -- Help\n"
+			"\t-o dir -- Output director\n"
+			"\t-l -- List PMCs\n"
+			"\t-p pmc[, ...] -- List of pmc to monitor\n");
+}
+
 bool
 bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 {
-	int c = 1;
+	int opt;
+	struct stat s;
+
 	b->default_count = BCPID_DEFAULT_COUNT;
 	b->default_pmc = "";
 	b->default_output_dir = BCPID_OUTPUT_DIRECTORY;
@@ -1609,30 +1623,18 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 	b->node_collect_threshold = BCPID_NODE_GC_THRESHOLD;
 	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
 
-	while (c) {
-		c = getopt(argc, (char **)argv, "hc:p:lo:");
-		if (c == -1) {
-			break;
-		}
-
-		switch (c) {
+	while ((opt = getopt(argc, (char **)argv, "hc:p:lo:")) != -1) {
+		switch (opt) {
 		case 'c':
 			b->default_count = atoi(optarg);
 			break;
 		case 'h': {
-			fprintf(stderr, "Help: \n  -c count "
-				"(Number of counter increments between interrupt)\n"
-				"  -h (Show this help)\n"
-				"  -p pmc[, ...] list of pmc to monitor\n"
-				"  -o dir output to dir\n"
-				"  -l (List names of PMCs)\n");
-			return false;
-			break;
+			usage();
+			exit(EX_OK);
 		}
 		case 'l': {
 			bcpid_printcpu();
-			return false;
-			break;
+			exit(EX_OK);
 		}
 		case 'p': {
 			b->pmc_override = true;
@@ -1644,11 +1646,10 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 			break;
 		}
 		default:
-			break;
+			usage();
+			exit(EX_USAGE);
 		}
 	}
-
-	struct stat s;
 
 	if (stat(BCPID_OUTPUT_DIRECTORY, &s) == -1) {
 		MSG("Please create directory %s", BCPID_OUTPUT_DIRECTORY);
@@ -1694,7 +1695,6 @@ bcpid_printcpu()
 		exit(1);
 	}
 
-	fprintf(stderr, "---Dump CPU Info--\n");
 	fprintf(stderr, "CPU Type: %s, CPUs: %d, PMCs: %d, Classes: %d\n",
 		pmc_name_of_cputype(cpuinfo->pm_cputype), cpuinfo->pm_ncpu,
 		cpuinfo->pm_npmc, cpuinfo->pm_nclass);
@@ -1712,15 +1712,21 @@ bcpid_printcpu()
 		int evts;
 		const char **evtlst;
 		enum pmc_class pc = c->pm_class;
+		if (pc == PMC_CLASS_IAP) {
+			pmc_pmu_print_counters(NULL);
+			continue;
+		}
+
 		status = pmc_event_names_of_class(pc, &evtlst, &evts);
 		if (status < 0) {
 			PERROR("pmc_event_names_of_class");
-			return;
+			exit(1);
 		}
 
 		for (int j = 0; j < evts; j++) {
-			fprintf(stderr, "  %s\n", evtlst[j]);
+			fprintf(stderr, "\t%s\n", evtlst[j]);
 		}
+		free(evtlst);
 	}
 }
 

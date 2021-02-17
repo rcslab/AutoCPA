@@ -1,6 +1,8 @@
 *.o
 *.debug
 *.full
+*.bin
+*.csv
 .depend
 
 /bcpid/bcpid
