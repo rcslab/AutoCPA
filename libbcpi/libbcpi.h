@@ -7,8 +7,8 @@
 
 #ifdef __cplusplus
 
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 extern "C" {
 
@@ -83,27 +83,35 @@ void bcpi_free(struct bcpi_record *);
 bool bcpi_is_equal(struct bcpi_record *a, struct bcpi_record *b);
 int bcpi_get_index_from_name(struct bcpi_record *record, const char *name);
 void bcpi_print_summary(const struct bcpi_record *r);
-int bcpi_merge(struct bcpi_record **out, const struct bcpi_record **list, int num);
-void bcpi_show_node_info(struct bcpi_record *r, struct bcpi_node *, const char *sort_criteria);
+int bcpi_merge(
+    struct bcpi_record **out, const struct bcpi_record **list, int num);
+void bcpi_show_node_info(
+    struct bcpi_record *r, struct bcpi_node *, const char *sort_criteria);
 
 #ifdef __cplusplus
 
 } // extern "C"
 
-void bcpi_collect_edge(struct bcpi_node *n, std::vector<struct bcpi_edge *> &edge_out);
+void bcpi_collect_edge(
+    struct bcpi_node *n, std::vector<struct bcpi_edge *> &edge_out);
 
-void bcpi_collect_node(struct bcpi_record *record, std::vector<struct bcpi_node *> &node_out);
+void bcpi_collect_node(
+    struct bcpi_record *record, std::vector<struct bcpi_node *> &node_out);
 
-void bcpi_node_sort(int, std::vector<struct bcpi_node*> &sorted_nodes);
+void bcpi_node_sort(int, std::vector<struct bcpi_node *> &sorted_nodes);
 
-void bcpi_edge_sort(int index , std::vector<struct bcpi_edge*> &sorted_edges);
+void bcpi_edge_sort(int index, std::vector<struct bcpi_edge *> &sorted_edges);
 
-void bcpi_collect_object(struct bcpi_record *record, std::vector<struct bcpi_object *> &object_out, const char *name);
+void bcpi_collect_object(struct bcpi_record *record,
+    std::vector<struct bcpi_object *> &object_out, const char *name);
 
-void bcpi_collect_node_from_object(struct bcpi_record *record, std::vector<struct bcpi_node *> &node_out, struct bcpi_object *ro);
+void bcpi_collect_node_from_object(struct bcpi_record *record,
+    std::vector<struct bcpi_node *> &node_out, struct bcpi_object *ro);
 
-std::vector<bcpi_node *> hash2vec(std::unordered_map<uint64_t, bcpi_node *> umap);
+std::vector<bcpi_node *> hash2vec(
+    std::unordered_map<uint64_t, bcpi_node *> umap);
 
-std::vector<bcpi_node *> vec2hash_merge_nodes(int index, std::vector<bcpi_node *> nodes);
+std::vector<bcpi_node *> vec2hash_merge_nodes(
+    int index, std::vector<bcpi_node *> nodes);
 
 #endif

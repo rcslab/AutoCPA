@@ -1,38 +1,37 @@
-#include <unistd.h>
-#include <pthread.h>
-#include <fcntl.h>
-#include <string.h>
-#include <strings.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <sysexits.h>
-
-#include <sys/stat.h>
-#include <sys/event.h>
 #include <sys/param.h>
+#include <sys/event.h>
+#include <sys/mman.h>
 #include <sys/queue.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/user.h>
 #include <sys/utsname.h>
-#include <sys/mman.h>
-#include <sys/resource.h>
 
+#include <fcntl.h>
+#include <libprocstat.h>
 #include <pmc.h>
 #include <pmclog.h>
-#include <libprocstat.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <sysexits.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <map>
+#include <set>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <string>
-#include <set>
-#include <algorithm>
 
-#include "debug.h"
-#include "../libbcpi/libbcpi.h"
 #include "../libbcpi/crc32.h"
+#include "../libbcpi/libbcpi.h"
+#include "debug.h"
 
 /*
  * Set up signal handlers so that the program doesn't get
@@ -63,7 +62,7 @@ bcpid_signal_init(void (*signal_handler)(int num))
 	sigaction(SIGPIPE, &sa, 0);
 	sigaction(SIGXCPU, &sa, 0);
 
-	// Currently we don't spawn childs, but may as well leave this here
+	// Currently we don't spawn children, but may as well leave this here
 	sa.sa_handler = SIG_DFL;
 	sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT;
 	sigaction(SIGCHLD, &sa, 0);
@@ -76,7 +75,7 @@ bcpid_signal_init(void (*signal_handler)(int num))
 #define BCPID_INTERVAL 1000
 
 // Macro for doing 8 byte alignment. Unused currently
-#define BCPID_ROUND_UP_8(x) (((x)+(7)) & (~7))
+#define BCPID_ROUND_UP_8(x) (((x) + (7)) & (~7))
 
 // Upper bound for number of event types that PMCLOG interface delivers
 // Shouldn't require modification
@@ -117,8 +116,7 @@ bcpid_signal_init(void (*signal_handler)(int num))
 typedef void (*bcpid_event_handler)(struct bcpid *b, const struct pmclog_ev *);
 
 // Keep track of event received from PMCLOG interface
-struct bcpid_pmclog_event
-{
+struct bcpid_pmclog_event {
 	bool is_valid;
 	const char *name;
 	uint64_t num_fire;
@@ -126,22 +124,19 @@ struct bcpid_pmclog_event
 };
 
 // Store ID of PMC counters allocated per CPU.
-struct bcpid_pmc_cpu
-{
+struct bcpid_pmc_cpu {
 	pmc_id_t pmcs[BCPI_MAX_NUM_COUNTER];
 };
 
 // Keep track of counters allocated
-struct bcpid_pmc_counter
-{
+struct bcpid_pmc_counter {
 	bool is_valid;
 	uint64_t hits;
 	const char *name;
 };
 
 // Represent a distinct object file (executable or dynamic library)
-struct bcpid_object
-{
+struct bcpid_object {
 	const char *path;
 	struct timespec last_modified;
 	bcpi_hash hash;
@@ -155,8 +150,7 @@ struct bcpid_object
 };
 
 // Represent a mapping inside a process
-struct bcpid_program_mapping
-{
+struct bcpid_program_mapping {
 	uint64_t start;
 	uint64_t end;
 	// offset of this section in the corresponding ELF file
@@ -170,14 +164,13 @@ struct bcpid_program_mapping
 // undefined behavior when mapping overlaps
 bool
 bcpid_program_mapping_sort(const struct bcpid_program_mapping &me,
-	const struct bcpid_program_mapping &other)
+    const struct bcpid_program_mapping &other)
 {
 	return me.start < other.start;
 }
 
 // Represent a distinct process
-struct bcpid_program
-{
+struct bcpid_program {
 	int pid;
 	std::vector<struct bcpid_program_mapping> mappings;
 };
@@ -185,16 +178,14 @@ struct bcpid_program
 struct bcpid_pc_node;
 
 // An edge in a call chain graph
-struct bcpid_pc_edge
-{
+struct bcpid_pc_edge {
 	uint64_t hits[BCPI_MAX_NUM_COUNTER];
 	struct bcpid_pc_node *from;
 	struct bcpid_pc_node *to;
 };
 
 // A vertex in a call chain graph
-struct bcpid_pc_node
-{
+struct bcpid_pc_node {
 	uint64_t value;
 	uint64_t flag;
 	struct bcpid_object *obj;
@@ -203,7 +194,7 @@ struct bcpid_pc_node
 	// Map downstream node to the edge between nodes, where
 	// counter numbers are actually stored
 	std::unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge>
-	incoming_edge_map;
+	    incoming_edge_map;
 
 	// Used during compression
 	int tmp_archive_node_index;
@@ -251,13 +242,12 @@ struct bcpid_hash_cache {
 	bcpi_hash hash;
 };
 
-struct bcpid
-{
+struct bcpid {
 	int num_pmclog_event;
 	int num_cpu;
 
 	int selfpid;
-	struct procstat* procstat;
+	struct procstat *procstat;
 	void *pmclog_handle;
 
 	int pipefd[2];
@@ -283,7 +273,8 @@ struct bcpid
 	struct kevent kevent_in_batch[BCPID_KEVENT_MAX_BATCH_SIZE];
 	struct kevent kevent_out_batch[BCPID_KEVENT_MAX_BATCH_SIZE];
 
-	std::unordered_map<pmc_id_t, struct bcpid_pmc_counter *> pmcid_to_counter;
+	std::unordered_map<pmc_id_t, struct bcpid_pmc_counter *>
+	    pmcid_to_counter;
 	std::unordered_map<int, struct bcpid_program *> pid_to_program;
 	std::unordered_map<std::string, struct bcpid_object *> path_to_object;
 
@@ -336,9 +327,9 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 
 	auto oit = b->object_hash_cache.find(std::string(path));
 	if (oit != b->object_hash_cache.end()) {
-		bcpid_hash_cache * cache = &oit->second;
+		bcpid_hash_cache *cache = &oit->second;
 		if (!memcmp(&cache->last_modified, &obj->last_modified,
-		            sizeof(obj->last_modified))) {
+			sizeof(obj->last_modified))) {
 			obj->hash = cache->hash;
 			return;
 		}
@@ -353,8 +344,8 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 	}
 
 	off_t file_size = s.st_size;
-	void *file_content = mmap(0, file_size, PROT_READ, MAP_NOCORE | MAP_SHARED,
-		file_fd, 0);
+	void *file_content = mmap(
+	    0, file_size, PROT_READ, MAP_NOCORE | MAP_SHARED, file_fd, 0);
 	if (file_content == MAP_FAILED) {
 		PERROR("mmap");
 		close(file_fd);
@@ -413,7 +404,8 @@ bcpid_pmglog_thread_main(void *arg)
 		}
 
 		for (int cursor = 0; cursor < n;) {
-			int nw = write(non_block_pmclog_fd, &buffer[cursor], n - cursor);
+			int nw = write(
+			    non_block_pmclog_fd, &buffer[cursor], n - cursor);
 			if (nw < 0) {
 				if (errno != EAGAIN && errno != EWOULDBLOCK) {
 					PERROR("write");
@@ -461,10 +453,12 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
 
 	std::string object_path;
 
-	// Path provided by PMCLOG is erroneous for kernel modules and kernel itself
-	// This is fixed by prepending top level path to kernel and modules
+	// Path provided by PMCLOG is erroneous for kernel modules and kernel
+	// itself This is fixed by prepending top level path to kernel and
+	// modules
 	if (!strcmp(path, "kernel") || strstr(path, ".ko")) {
-		object_path = std::string(BCPID_KERNEL_PATH) + std::string(path);
+		object_path = std::string(BCPID_KERNEL_PATH) +
+		    std::string(path);
 	}
 
 	bcpid_kernel_object ko;
@@ -493,7 +487,7 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 		proc = pit->second;
 	}
 
-	for (const bcpid_kernel_object &ko: b->kernel_objects) {
+	for (const bcpid_kernel_object &ko : b->kernel_objects) {
 		auto oit = b->path_to_object.find(ko.path);
 		struct bcpid_object *obj;
 		if (oit == b->path_to_object.end()) {
@@ -514,7 +508,7 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 	}
 
 	sort(proc->mappings.begin(), proc->mappings.end(),
-		bcpid_program_mapping_sort);
+	    bcpid_program_mapping_sort);
 }
 
 /*
@@ -523,9 +517,9 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 void
 bcpid_garbage_collect(struct bcpid *b)
 {
-	for (auto p: b->path_to_object) {
+	for (auto p : b->path_to_object) {
 		bcpid_object *o = p.second;
-		for (auto np: o->node_map) {
+		for (auto np : o->node_map) {
 			bcpid_pc_node *n = np.second;
 			delete n;
 		}
@@ -535,7 +529,7 @@ bcpid_garbage_collect(struct bcpid *b)
 
 	b->path_to_object.clear();
 
-	for (auto p: b->pid_to_program) {
+	for (auto p : b->pid_to_program) {
 		bcpid_program *prog = p.second;
 		delete prog;
 	}
@@ -573,7 +567,8 @@ void bcpid_stop_all(struct bcpid *);
 void
 bcpid_save(struct bcpid *b)
 {
-	struct bcpi_record *record = (struct bcpi_record *)malloc(sizeof(*record));
+	struct bcpi_record *record = (struct bcpi_record *)malloc(
+	    sizeof(*record));
 	record->epoch = time(0);
 
 	// Embed system description in the file
@@ -584,15 +579,15 @@ bcpid_save(struct bcpid *b)
 		record->system_name = strdup("");
 	} else {
 		char system_name[512];
-		snprintf(system_name, 511, "%s %s %s %s %s", uts.sysname, uts.release,
-			uts.version, uts.nodename, uts.machine);
+		snprintf(system_name, 511, "%s %s %s %s %s", uts.sysname,
+		    uts.release, uts.version, uts.nodename, uts.machine);
 		record->system_name = strdup(system_name);
 	}
 
 	int num_counter = bcpid_num_active_counter(b);
 	record->num_counter = num_counter;
-	record->counter_name = (const char **)
-		malloc(sizeof(*record->counter_name)*num_counter);
+	record->counter_name = (const char **)malloc(
+	    sizeof(*record->counter_name) * num_counter);
 
 	int name_index = 0;
 	int index_mapping[BCPI_MAX_NUM_COUNTER];
@@ -608,7 +603,7 @@ bcpid_save(struct bcpid *b)
 	}
 
 	int num_object = 0;
-	for (auto &object_it: b->path_to_object) {
+	for (auto &object_it : b->path_to_object) {
 		struct bcpid_object *object = object_it.second;
 
 		if (!object->node_map.size()) {
@@ -619,11 +614,11 @@ bcpid_save(struct bcpid *b)
 	}
 
 	record->num_object = num_object;
-	record->object_list = (struct bcpi_object *)
-		malloc(sizeof(*record->object_list)*record->num_object);
+	record->object_list = (struct bcpi_object *)malloc(
+	    sizeof(*record->object_list) * record->num_object);
 
 	int object_index = 0;
-	for (auto &object_it: b->path_to_object) {
+	for (auto &object_it : b->path_to_object) {
 		struct bcpid_object *object = object_it.second;
 		struct bcpi_object *ro = &record->object_list[object_index];
 
@@ -637,12 +632,12 @@ bcpid_save(struct bcpid *b)
 		ro->function_list = 0;
 		ro->num_function = 0;
 		ro->num_node = object->node_map.size();
-		ro->node_list = (struct bcpi_node *)
-			malloc(sizeof(*ro->node_list)*ro->num_node);
+		ro->node_list = (struct bcpi_node *)malloc(
+		    sizeof(*ro->node_list) * ro->num_node);
 		ro->object_index = object_index;
 
 		int node_index = 0;
-		for (auto &node_it: object->node_map) {
+		for (auto &node_it : object->node_map) {
 			struct bcpid_pc_node *node = node_it.second;
 			struct bcpi_node *rn = &ro->node_list[node_index];
 
@@ -651,30 +646,34 @@ bcpid_save(struct bcpid *b)
 			rn->object = ro;
 			rn->node_address = node->value;
 			rn->num_incoming_edge = node->incoming_edge_map.size();
-			rn->edge_list = (struct bcpi_edge *)
-				malloc(sizeof(*rn->edge_list)*rn->num_incoming_edge);
+			rn->edge_list = (struct bcpi_edge *)malloc(
+			    sizeof(*rn->edge_list) * rn->num_incoming_edge);
 			rn->node_index = node_index;
 
 			for (int i = 0; i < name_index; ++i) {
-				rn->terminal_counters[i] = node->end_ctr[index_mapping[i]];
+				rn->terminal_counters[i] =
+				    node->end_ctr[index_mapping[i]];
 			}
 
 			int edge_index = 0;
-			for (auto &edge_it: node->incoming_edge_map) {
+			for (auto &edge_it : node->incoming_edge_map) {
 				struct bcpid_pc_edge *edge = &edge_it.second;
-				struct bcpi_edge *re = &rn->edge_list[edge_index];
+				struct bcpi_edge *re =
+				    &rn->edge_list[edge_index];
 
 				re->to = rn;
 				/*
 				 * Temporarily use this field to hold pointer to
 				 * the originating node that is part of daemon
-				 * data structure (as opposed to record data structure),
-				 * since the latter may not have been allocated yet.
-				 * Will be corrected during second pass.
+				 * data structure (as opposed to record data
+				 * structure), since the latter may not have
+				 * been allocated yet. Will be corrected during
+				 * second pass.
 				 */
 				re->from = (struct bcpi_node *)edge->from;
 				for (int i = 0; i < name_index; ++i) {
-					re->counters[i] = edge->hits[index_mapping[i]];
+					re->counters[i] =
+					    edge->hits[index_mapping[i]];
 				}
 				++edge_index;
 			}
@@ -690,19 +689,22 @@ bcpid_save(struct bcpid *b)
 			for (int k = 0; k < rn->num_incoming_edge; ++k) {
 				struct bcpi_edge *re = &rn->edge_list[k];
 				/*
-				 * Here we correct this field to point to record data structure
-				 * using indexes that were set up during first pass
+				 * Here we correct this field to point to record
+				 * data structure using indexes that were set up
+				 * during first pass
 				 */
-				struct bcpid_pc_node *node_from = (struct bcpid_pc_node *)
-					re->from;
+				struct bcpid_pc_node *node_from =
+				    (struct bcpid_pc_node *)re->from;
 
-				int from_index_object = node_from->obj->tmp_archive_object_index;
-				int from_index_node = node_from->tmp_archive_node_index;
+				int from_index_object =
+				    node_from->obj->tmp_archive_object_index;
+				int from_index_node =
+				    node_from->tmp_archive_node_index;
 
 				struct bcpi_object *from_object =
-					&record->object_list[from_index_object];
+				    &record->object_list[from_index_object];
 				struct bcpi_node *from_node =
-					&from_object->node_list[from_index_node];
+				    &from_object->node_list[from_index_node];
 				re->from = from_node;
 			}
 		}
@@ -715,7 +717,7 @@ bcpid_save(struct bcpid *b)
 
 	char file_name[256];
 	snprintf(file_name, 255, "%s/bcpi_%s_%s.bin", b->default_output_dir,
-		time_buffer, uts.nodename);
+	    time_buffer, uts.nodename);
 	status = bcpi_save_file(record, file_name);
 	if (status) {
 		bcpi_free(record);
@@ -743,9 +745,9 @@ bcpid_save(struct bcpid *b)
 void
 bcpid_program_mapping_dump(const std::vector<bcpid_program_mapping> &mappings)
 {
-	for (const bcpid_program_mapping &m: mappings) {
-		fprintf(stderr, "%lx, %lx, %lx, %x\n", m.start, m.end, m.file_offset,
-			m.protection);
+	for (const bcpid_program_mapping &m : mappings) {
+		fprintf(stderr, "%lx, %lx, %lx, %x\n", m.start, m.end,
+		    m.file_offset, m.protection);
 	}
 }
 
@@ -755,8 +757,7 @@ bcpid_program_mapping_dump(const std::vector<bcpid_program_mapping> &mappings)
  * it then retreives the node, and creates one if necessary.
  */
 struct bcpid_pc_node *
-bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc,
-	uint64_t pc)
+bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc, uint64_t pc)
 {
 	// Until there is a better way to distinguish kernel address,
 	// this is currently used. Note that '-1' is PMCLOG's way of
@@ -765,14 +766,15 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc,
 		proc = b->pid_to_program[-1];
 	}
 
-	struct bcpid_program_mapping m = {pc, 0, 0, 0, 0};
+	struct bcpid_program_mapping m = { pc, 0, 0, 0, 0 };
 	// Upper bound performs binary search. It is assumed that
 	// there is no overlap in address spaces.
 	auto it = upper_bound(proc->mappings.begin(), proc->mappings.end(), m,
-		bcpid_program_mapping_sort);
+	    bcpid_program_mapping_sort);
 	if (it == proc->mappings.end()) {
 		if (!proc->mappings.size()) {
-			bcpid_debug_counter_increment(b, bcpid_debug_empty_mapping_pc);
+			bcpid_debug_counter_increment(
+			    b, bcpid_debug_empty_mapping_pc);
 			return 0;
 		}
 	}
@@ -821,14 +823,15 @@ struct bcpid_program *
 bcpid_init_proc(struct bcpid *b, int pid)
 {
 	uint32_t count;
-	struct kinfo_proc *kproc = procstat_getprocs(b->procstat, KERN_PROC_PID,
-		pid, &count);
+	struct kinfo_proc *kproc = procstat_getprocs(
+	    b->procstat, KERN_PROC_PID, pid, &count);
 	if (!count || !kproc) {
 		bcpid_debug_counter_increment(b, bcpid_debug_getprocs_fail);
 		return 0;
 	}
 
-	struct kinfo_vmentry *vm = procstat_getvmmap(b->procstat, kproc, &count);
+	struct kinfo_vmentry *vm = procstat_getvmmap(
+	    b->procstat, kproc, &count);
 	if (!count || !vm) {
 		bcpid_debug_counter_increment(b, bcpid_debug_getvmmap_fail);
 		procstat_freeprocs(b->procstat, kproc);
@@ -867,7 +870,7 @@ bcpid_init_proc(struct bcpid *b, int pid)
 
 	// Sorting mappings allows binary search
 	sort(exec->mappings.begin(), exec->mappings.end(),
-		bcpid_program_mapping_sort);
+	    bcpid_program_mapping_sort);
 
 	procstat_freevmmap(b->procstat, vm);
 	procstat_freeprocs(b->procstat, kproc);
@@ -898,7 +901,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 
 	int pid = cc->pl_pid;
 	if (pid == b->selfpid) {
-		bcpid_debug_counter_increment(b, bcpid_debug_callchain_self_fire);
+		bcpid_debug_counter_increment(
+		    b, bcpid_debug_callchain_self_fire);
 		return;
 	}
 
@@ -907,8 +911,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 	if (it == b->pid_to_program.end()) {
 		proc = bcpid_init_proc(b, pid);
 		if (!proc) {
-			bcpid_debug_counter_increment(b,
-				bcpid_debug_callchain_proc_init_fail);
+			bcpid_debug_counter_increment(
+			    b, bcpid_debug_callchain_proc_init_fail);
 			return;
 		}
 		b->pid_to_program.emplace(pid, proc);
@@ -919,7 +923,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 	struct bcpid_pmc_counter *spec;
 	auto sit = b->pmcid_to_counter.find(cc->pl_pmcid);
 	if (sit == b->pmcid_to_counter.end()) {
-		bcpid_debug_counter_increment(b, bcpid_debug_callchain_counter_gone);
+		bcpid_debug_counter_increment(
+		    b, bcpid_debug_callchain_counter_gone);
 		return;
 	}
 
@@ -933,7 +938,7 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 	struct bcpid_pc_node *from_node;
 
 	for (int i = 1; i < chain_len; ++i) {
-		uint64_t to_pc = cc->pl_pc[i-1];
+		uint64_t to_pc = cc->pl_pc[i - 1];
 		uint64_t from_pc = cc->pl_pc[i];
 
 		if (i > 1) {
@@ -944,7 +949,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 
 		from_node = bcpid_get_node_from_pc(b, proc, from_pc);
 		if (!to_node || !from_node) {
-			bcpid_debug_counter_increment(b, bcpid_debug_callchain_pc_skip);
+			bcpid_debug_counter_increment(
+			    b, bcpid_debug_callchain_pc_skip);
 			continue;
 		}
 
@@ -1061,16 +1067,17 @@ bcpid_register_handlers(struct bcpid *b)
 }
 
 /*
- * A wrapper to batch kqueue event updates and to reduce number of calls to kqueue
+ * A wrapper to batch kqueue event updates and to reduce number of calls to
+ * kqueue
  */
 void
 bcpid_kevent_set(struct bcpid *b, uintptr_t ident, short filter, u_short flags,
-	u_int fflags, int64_t data, void *udata)
+    u_int fflags, int64_t data, void *udata)
 {
 	int cur_size = b->kevent_in_size;
 	assert(cur_size < BCPID_KEVENT_MAX_BATCH_SIZE);
-	EV_SET(&b->kevent_in_batch[cur_size], ident, filter, flags, fflags, data,
-		udata);
+	EV_SET(&b->kevent_in_batch[cur_size], ident, filter, flags, fflags,
+	    data, udata);
 	b->kevent_in_size++;
 }
 
@@ -1106,7 +1113,8 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 	}
 
 	if (!ctr) {
-		MSG("cannot add %s: all %d pmcs allocated", name, BCPI_MAX_NUM_COUNTER);
+		MSG("cannot add %s: all %d pmcs allocated", name,
+		    BCPI_MAX_NUM_COUNTER);
 		return;
 	}
 	MSG("allocating %s", name);
@@ -1114,8 +1122,8 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 	for (int i = 0; i < b->num_cpu; ++i) {
 		struct bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
 		pmc_id_t pmc_id;
-		int status = pmc_allocate(name, PMC_MODE_SS, PMC_F_CALLCHAIN, i,
-			&pmc_id, count);
+		int status = pmc_allocate(
+		    name, PMC_MODE_SS, PMC_F_CALLCHAIN, i, &pmc_id, count);
 		if (status < 0) {
 			PERROR("pmc_allocate");
 			goto fail;
@@ -1240,13 +1248,14 @@ bcpid_setup_pmc(struct bcpid *b)
 		PERROR("kqueue");
 	}
 
-	bcpid_kevent_set(b, b->non_block_pipefd[0], EVFILT_READ, EV_ADD, 0, 0, 0);
+	bcpid_kevent_set(
+	    b, b->non_block_pipefd[0], EVFILT_READ, EV_ADD, 0, 0, 0);
 	bcpid_kevent_set(b, STDIN_FILENO, EVFILT_READ, EV_ADD, 0, 0, 0);
-	bcpid_kevent_set(b, BCPID_TIMER_MAGIC, EVFILT_TIMER, EV_ADD, 0,
-		BCPID_INTERVAL, 0);
+	bcpid_kevent_set(
+	    b, BCPID_TIMER_MAGIC, EVFILT_TIMER, EV_ADD, 0, BCPID_INTERVAL, 0);
 
-	status = pthread_create(&b->pmclog_forward_thr, 0, bcpid_pmglog_thread_main,
-		b);
+	status = pthread_create(
+	    &b->pmclog_forward_thr, 0, bcpid_pmglog_thread_main, b);
 	if (status != 0) {
 		SYSERROR("pthred_create: %s", strerror(status));
 	}
@@ -1309,7 +1318,8 @@ bcpid_handle_pmclog(struct bcpid *b)
 		pmclog_read(b->pmclog_handle, &ev);
 		if (ev.pl_state != PMCLOG_OK) {
 			if (ev.pl_state != PMCLOG_REQUIRE_DATA) {
-				const char *state_name = g_bcpid_pmclog_state_name[ev.pl_state];
+				const char *state_name =
+				    g_bcpid_pmclog_state_name[ev.pl_state];
 				SYSERROR("pmclog broken: %s", state_name);
 			}
 			break;
@@ -1408,8 +1418,8 @@ bcpid_handle_stdin(struct bcpid *b)
 		fprintf(stderr, "%d nodes\n", b->num_node);
 		fprintf(stderr, "%d edges\n", b->num_edge);
 		for (int i = 0; i < bcpid_debug_counter_max; ++i) {
-			fprintf(stderr, "%s: %ld\n", g_bcpid_debug_counter_name[i],
-				b->debug_counter[i]);
+			fprintf(stderr, "%s: %ld\n",
+			    g_bcpid_debug_counter_name[i], b->debug_counter[i]);
 		}
 	} else if (!strcmp(arg, "save")) {
 		bcpid_save(b);
@@ -1485,7 +1495,8 @@ bcpid_handle_timer(bcpid *b)
 	}
 
 	new_time = tv_to_sec(&r.ru_utime) + tv_to_sec(&r.ru_stime);
-	old_time = tv_to_sec(&b->last_usage.ru_utime) + tv_to_sec(&b->last_usage.ru_stime);
+	old_time = tv_to_sec(&b->last_usage.ru_utime) +
+	    tv_to_sec(&b->last_usage.ru_stime);
 	time_diff = new_time - old_time;
 	/*
 	fprintf(stderr, "%f\n", (double)time_diff/(double)1000000);
@@ -1517,8 +1528,9 @@ void
 bcpid_main_loop(struct bcpid *b)
 {
 	while (!g_quit) {
-		int r = kevent(b->kqueue_fd, b->kevent_in_batch, b->kevent_in_size,
-			b->kevent_out_batch, b->kevent_out_size, 0);
+		int r = kevent(b->kqueue_fd, b->kevent_in_batch,
+		    b->kevent_in_size, b->kevent_out_batch, b->kevent_out_size,
+		    0);
 		b->kevent_in_size = 0;
 		if (r < 0) {
 			PERROR("kqueue");
@@ -1528,7 +1540,8 @@ bcpid_main_loop(struct bcpid *b)
 		for (int i = 0; i < r; ++i) {
 			struct kevent *ke = &b->kevent_out_batch[i];
 			if (ke->filter == EVFILT_READ) {
-				if (ke->ident == (unsigned long)b->non_block_pipefd[0]) {
+				if (ke->ident ==
+				    (unsigned long)b->non_block_pipefd[0]) {
 					bcpid_handle_pmclog(b);
 				}
 
@@ -1597,12 +1610,13 @@ bcpid_parse_global_config(struct bcpid *b)
 static void
 usage()
 {
-	fprintf(stderr, "Usage: bcpid [-c count] [-p pmc] [-o dir]\n"
-		        "\t-c count -- Sampling interval\n"
-			"\t-h -- Help\n"
-			"\t-o dir -- Output director\n"
-			"\t-l -- List PMCs\n"
-			"\t-p pmc[, ...] -- List of pmc to monitor\n");
+	fprintf(stderr,
+	    "Usage: bcpid [-c count] [-p pmc] [-o dir]\n"
+	    "\t-c count -- Sampling interval\n"
+	    "\t-h -- Help\n"
+	    "\t-o dir -- Output director\n"
+	    "\t-l -- List PMCs\n"
+	    "\t-p pmc[, ...] -- List of pmc to monitor\n");
 }
 
 bool
@@ -1692,16 +1706,17 @@ bcpid_printcpu()
 	}
 
 	fprintf(stderr, "CPU Type: %s, CPUs: %d, PMCs: %d, Classes: %d\n",
-		pmc_name_of_cputype(cpuinfo->pm_cputype), cpuinfo->pm_ncpu,
-		cpuinfo->pm_npmc, cpuinfo->pm_nclass);
+	    pmc_name_of_cputype(cpuinfo->pm_cputype), cpuinfo->pm_ncpu,
+	    cpuinfo->pm_npmc, cpuinfo->pm_nclass);
 	for (int i = 0; i < cpuinfo->pm_nclass; i++) {
 		const struct pmc_classinfo *c = &cpuinfo->pm_classes[i];
 		fprintf(stderr, "Class %d %s: Width: %d, PMCS: %d, Caps: ", i,
-			pmc_name_of_class(c->pm_class), c->pm_width, c->pm_num);
+		    pmc_name_of_class(c->pm_class), c->pm_width, c->pm_num);
 		for (int j = 0; j < 31; ++j) {
 			if (c->pm_caps & (1 << j)) {
 				fprintf(stderr, "%s ",
-					pmc_name_of_capability((enum pmc_caps)(1 << j)));
+				    pmc_name_of_capability(
+					(enum pmc_caps)(1 << j)));
 			}
 		}
 		fprintf(stderr, "\nEvent Names: \n");
@@ -1745,7 +1760,8 @@ bcpid_print_pmcs()
 	for (int i = 0; i < npmcs; i++) {
 		struct pmc_info *p = &pmcinfo->pm_pmcs[i];
 		MSG("Name: %s, Class: %s, Mode: %s", p->pm_name,
-			pmc_name_of_class(p->pm_class), pmc_name_of_mode(p->pm_mode));
+		    pmc_name_of_class(p->pm_class),
+		    pmc_name_of_mode(p->pm_mode));
 	}
 }
 
@@ -1787,38 +1803,19 @@ bcpid_term_handler(int num)
 	MSG("received %s", strsignal(num));
 }
 
-const char *g_bcpid_pmclog_name[] = {
-	"PMCLOG_TYPE_PADDING",
-	"PMCLOG_TYPE_CLOSEMSG",
-	"PMCLOG_TYPE_DROPNOTIFY",
-	"PMCLOG_TYPE_INITIALIZE",
-	"PMCLOG_TYPE_PADDING",
-	"PMCLOG_TYPE_PMCALLOCATE",
-	"PMCLOG_TYPE_PMCATTACH",
-	"PMCLOG_TYPE_PMCDETACH",
-	"PMCLOG_TYPE_PROCCSW",
-	"PMCLOG_TYPE_PROCEXEC",
-	"PMCLOG_TYPE_PROCEXIT",
-	"PMCLOG_TYPE_PROCFORK",
-	"PMCLOG_TYPE_SYSEXIT",
-	"PMCLOG_TYPE_USERDATA",
-	"PMCLOG_TYPE_MAP_IN",
-	"PMCLOG_TYPE_MAP_OUT",
-	"PMCLOG_TYPE_CALLCHAIN",
-	"PMCLOG_TYPE_PMCALLOCATEDYN",
-	"PMCLOG_TYPE_THR_CREATE",
-	"PMCLOG_TYPE_THR_EXIT",
-	"PMCLOG_TYPE_PROC_CREATE",
-	0
-};
+const char *g_bcpid_pmclog_name[] = { "PMCLOG_TYPE_PADDING",
+	"PMCLOG_TYPE_CLOSEMSG", "PMCLOG_TYPE_DROPNOTIFY",
+	"PMCLOG_TYPE_INITIALIZE", "PMCLOG_TYPE_PADDING",
+	"PMCLOG_TYPE_PMCALLOCATE", "PMCLOG_TYPE_PMCATTACH",
+	"PMCLOG_TYPE_PMCDETACH", "PMCLOG_TYPE_PROCCSW", "PMCLOG_TYPE_PROCEXEC",
+	"PMCLOG_TYPE_PROCEXIT", "PMCLOG_TYPE_PROCFORK", "PMCLOG_TYPE_SYSEXIT",
+	"PMCLOG_TYPE_USERDATA", "PMCLOG_TYPE_MAP_IN", "PMCLOG_TYPE_MAP_OUT",
+	"PMCLOG_TYPE_CALLCHAIN", "PMCLOG_TYPE_PMCALLOCATEDYN",
+	"PMCLOG_TYPE_THR_CREATE", "PMCLOG_TYPE_THR_EXIT",
+	"PMCLOG_TYPE_PROC_CREATE", 0 };
 
-const char *g_bcpid_pmclog_state_name[] = {
-	"PMCLOG_OK",
-	"PMCLOG_EOF",
-	"PMCLOG_REQUIRE_DATA",
-	"PMCLOG_ERROR",
-	0
-};
+const char *g_bcpid_pmclog_state_name[] = { "PMCLOG_OK", "PMCLOG_EOF",
+	"PMCLOG_REQUIRE_DATA", "PMCLOG_ERROR", 0 };
 
 const char *g_bcpid_debug_counter_name[] = {
 	"bcpid_debug_empty_mapin_name",

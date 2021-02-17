@@ -9,12 +9,9 @@ extern "C" {
 
 #endif
 
-uint32_t
-bcpi_crc32(const void *buf, size_t size);
+uint32_t bcpi_crc32(const void *buf, size_t size);
 
 #if defined(__cplusplus)
-
 }
 
 #endif
-

@@ -1,92 +1,92 @@
-#include <err.h>
-#include <libelf.h>
-#include <gelf.h>
-
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <libgen.h>
-#include <stdint.h>
-#include <string.h>
-#include <string>
-#include <errno.h>
-#include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
-#include <fcntl.h>
+#include <sys/stat.h>
+
 #include <dwarf.h>
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <gelf.h>
 #include <libdwarf.h>
+#include <libelf.h>
+#include <libgen.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <iostream>
+#include <string>
 
 #include "find_an_address.h"
 
-
 struct section {
-	const char *name;    /* section name */
-	Elf_Scn *scn;    /* section scn */
-	uint64_t off;    /* section offset */
-	uint64_t sz;    /* section size */
-	uint64_t entsize;  /* section entsize */
-	uint64_t align;    /* section alignment */
-	uint64_t type;    /* section type */
-	uint64_t flags;    /* section flags */
-	uint64_t addr;    /* section virtual addr */
-	uint32_t link;    /* section link ndx */
-	uint32_t info;    /* section info ndx */
+	const char *name; /* section name */
+	Elf_Scn *scn;	  /* section scn */
+	uint64_t off;	  /* section offset */
+	uint64_t sz;	  /* section size */
+	uint64_t entsize; /* section entsize */
+	uint64_t align;	  /* section alignment */
+	uint64_t type;	  /* section type */
+	uint64_t flags;	  /* section flags */
+	uint64_t addr;	  /* section virtual addr */
+	uint32_t link;	  /* section link ndx */
+	uint32_t info;	  /* section info ndx */
 };
 
-//need a function  to process the new offset based on the two numbers
+// need a function  to process the new offset based on the two numbers
 uint64_t
 calculate_nums(uint64_t address, uint64_t offset, uint64_t num)
 {
 	uint64_t temp, finaladdr;
 	temp = num - offset;
-	finaladdr= temp + address;
+	finaladdr = temp + address;
 	return finaladdr;
 }
 
-//loading sections
-struct section*
+// loading sections
+struct section *
 load_sections(Elf *e, size_t shnum)
 {
-	struct section* sl=NULL;
-	size_t     shstrndx,ndx;
-	Elf_Scn    *scn;
-	GElf_Shdr   sh;
-	const char  *name;
-	int     elferr;
-	struct section  *s;
+	struct section *sl = NULL;
+	size_t shstrndx, ndx;
+	Elf_Scn *scn;
+	GElf_Shdr sh;
+	const char *name;
+	int elferr;
+	struct section *s;
 
 	if (sl != NULL)
 		free(sl);
-	if ((sl =(struct section *) calloc(shnum, sizeof(*sl))) == NULL)//calloc also set the allocated mem to zero
+	if ((sl = (struct section *)calloc(shnum, sizeof(*sl))) ==
+	    NULL) // calloc also set the allocated mem to zero
 		err(EXIT_FAILURE, "calloc failed");
 	/* Get the index of .shstrtab section. */
 	if (!elf_getshstrndx(e, &shstrndx))
-		errx (EXIT_FAILURE , "elf_getshstrndx() failed: %s." ,
-		      elf_errmsg (-1));
+		errx(EXIT_FAILURE, "elf_getshstrndx() failed: %s.",
+		    elf_errmsg(-1));
 	if ((scn = elf_getscn(e, 0)) == NULL)
 		return NULL;
 
-	(void) elf_errno();
+	(void)elf_errno();
 
 	do {
 		if (gelf_getshdr(scn, &sh) == NULL) {
 			warnx("gelf_getshdr failed: %s", elf_errmsg(-1));
-			(void) elf_errno();
+			(void)elf_errno();
 			continue;
 		}
 
 		if ((name = elf_strptr(e, shstrndx, sh.sh_name)) == NULL) {
-			(void) elf_errno();
+			(void)elf_errno();
 			name = "<no-name>";
 		}
 
 		if ((ndx = elf_ndxscn(scn)) == SHN_UNDEF) {
 			if ((elferr = elf_errno()) != 0) {
 				warnx("elf_ndxscn failed: %s",
-					elf_errmsg(elferr));
+				    elf_errmsg(elferr));
 				continue;
 			}
 		}
@@ -98,7 +98,7 @@ load_sections(Elf *e, size_t shnum)
 
 		if (sh.sh_link >= shnum)
 			warnx("section link %llu of '%s' out of range",
-				(unsigned long long)sh.sh_link, name);
+			    (unsigned long long)sh.sh_link, name);
 
 		s = &sl[ndx];
 		s->name = name;
@@ -116,46 +116,48 @@ load_sections(Elf *e, size_t shnum)
 	return sl;
 }
 
-//redundant comment
+// redundant comment
 uint64_t
 change_offset(uint64_t num, Elf *e)
 {
-	uintmax_t newnum, address, dwarfoff ;
-	struct section	*s, *snext, *sl=NULL;
+	uintmax_t newnum, address, dwarfoff;
+	struct section *s, *snext, *sl = NULL;
 	int i;
 	size_t shnum;
 
 	if (!elf_getshnum(e, &shnum))
-		errx (EXIT_FAILURE, " elf_getshnum() failed : %s. ",
-			elf_errmsg(-1));
+		errx(EXIT_FAILURE, " elf_getshnum() failed : %s. ",
+		    elf_errmsg(-1));
 	if (shnum == 0) {
 		printf("\nThere are no sections in this file.\n");
 		// return;
 	}
-	sl=load_sections(e, shnum);
+	sl = load_sections(e, shnum);
 
-	for (i = 0; (size_t)i < shnum-1; i++) {
-  		s = &sl[i]; //current s
-		snext = &sl[i+1];
-		if ((s->off <= num) && (num < snext->off )) {
-			newnum= s->off;
-			address= s->addr;
-		}//here we dont consider the case that num corresponds to the last section offset
-  	}
-	dwarfoff=calculate_nums(address, newnum, num);
+	for (i = 0; (size_t)i < shnum - 1; i++) {
+		s = &sl[i]; // current s
+		snext = &sl[i + 1];
+		if ((s->off <= num) && (num < snext->off)) {
+			newnum = s->off;
+			address = s->addr;
+		} // here we dont consider the case that num corresponds to the
+		  // last section offset
+	}
+	dwarfoff = calculate_nums(address, newnum, num);
 	return dwarfoff;
 }
 
 /* List a function if it's in the given DIE.
-*/
+ */
 void
-list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die, Dwarf_Addr address, Dwarf_Addr *low_pc, Dwarf_Addr *high_pc, std::string *diename, int *valid)
+list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die, Dwarf_Addr address,
+    Dwarf_Addr *low_pc, Dwarf_Addr *high_pc, std::string *diename, int *valid)
 {
-	char* die_name = 0;
-	const char* tag_name = 0;
+	char *die_name = 0;
+	const char *tag_name = 0;
 	Dwarf_Error err;
 	Dwarf_Half tag;
-	Dwarf_Attribute* attrs;
+	Dwarf_Attribute *attrs;
 	Dwarf_Addr lowpc, highpc;
 	Dwarf_Signed attrcount, i;
 	int rc = dwarf_diename(the_die, &die_name, &err);
@@ -195,23 +197,25 @@ list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die, Dwarf_Addr address, Dwarf_A
 			dwarf_formaddr(attrs[i], &highpc, 0);
 	}
 
-	if ((lowpc==address)||(address==highpc)){
-		//chon man fght esme function ha ro mikham dar nahayat, pas sharte if
-		//ro age fght address == lowpc ya address ==highpc bezaram okeye
-		*low_pc=lowpc;
-		*high_pc=highpc;
-		*diename=die_name;
-		*valid=0;
-		//printf("DW_TAG_subprogram: '%s'\n", die_name);
-		//printf("low pc  : 0x%08llx\n",(unsigned long long) lowpc);
-		//printf("high pc : 0x%08llx\n",(unsigned long long) highpc);
+	if ((lowpc == address) || (address == highpc)) {
+		// chon man fght esme function ha ro mikham dar nahayat, pas
+		// sharte if ro age fght address == lowpc ya address ==highpc
+		// bezaram okeye
+		*low_pc = lowpc;
+		*high_pc = highpc;
+		*diename = die_name;
+		*valid = 0;
+		// printf("DW_TAG_subprogram: '%s'\n", die_name);
+		// printf("low pc  : 0x%08llx\n",(unsigned long long) lowpc);
+		// printf("high pc : 0x%08llx\n",(unsigned long long) highpc);
 	}
 }
 
 /* List all the functions from the file represented by the given descriptor.
-*/
+ */
 void
-list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_Addr *high, std::string *namedie, int *valid)
+list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low,
+    Dwarf_Addr *high, std::string *namedie, int *valid)
 {
 	Dwarf_Unsigned cu_header_length, abbrev_offset, next_cu_header;
 	Dwarf_Half version_stamp, address_size;
@@ -222,17 +226,12 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 		/* Find a compilation unit header */
 		// cerr << "haha\n";
 		int temp;
-		temp= dwarf_next_cu_header(
-			dbg,
-			&cu_header_length,
-			&version_stamp,
-			&abbrev_offset,
-			&address_size,
-			&next_cu_header,
-			&err);
-		if (temp==DW_DLV_ERROR)
+		temp = dwarf_next_cu_header(dbg, &cu_header_length,
+		    &version_stamp, &abbrev_offset, &address_size,
+		    &next_cu_header, &err);
+		if (temp == DW_DLV_ERROR)
 			std::cout << "Error reading DWARF cu header\n";
-		if (temp==DW_DLV_NO_ENTRY){
+		if (temp == DW_DLV_NO_ENTRY) {
 			// cerr << "here we are at the end of all CUs\n";
 			break;
 		}
@@ -249,7 +248,8 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 		while (1) {
 			int rc;
 
-			list_func_in_die(dbg, child_die, address, low, high, namedie, valid);
+			list_func_in_die(
+			    dbg, child_die, address, low, high, namedie, valid);
 			rc = dwarf_siblingof(dbg, child_die, &child_die, &err);
 
 			if (rc == DW_DLV_ERROR)
@@ -261,7 +261,8 @@ list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low, Dwarf_A
 }
 
 static void
-dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num, std::string *src_file)
+dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address,
+    Dwarf_Unsigned *line_num, std::string *src_file)
 {
 	Dwarf_Die die;
 	Dwarf_Line *linebuf, ln;
@@ -273,8 +274,8 @@ dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num
 	char **srcfiles;
 	int i, ret;
 
-	while ((ret = dwarf_next_cu_header(dbg, NULL, NULL, NULL, NULL,
-	    NULL, &de)) == DW_DLV_OK) {
+	while ((ret = dwarf_next_cu_header(
+		    dbg, NULL, NULL, NULL, NULL, NULL, &de)) == DW_DLV_OK) {
 		if (dwarf_siblingof(dbg, NULL, &die, &de) != DW_DLV_OK)
 			continue;
 		if (dwarf_attrval_string(die, DW_AT_name, &file, &de) !=
@@ -283,7 +284,7 @@ dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num
 		if (dwarf_attrval_string(die, DW_AT_comp_dir, &dir, &de) !=
 		    DW_DLV_OK)
 			dir = NULL;
-		//printf("%-37s %11s   %s\n", "Filename", "Line Number",
+		// printf("%-37s %11s   %s\n", "Filename", "Line Number",
 		//  "Starting Address");
 		if (dwarf_srclines(die, &linebuf, &linecount, &de) != DW_DLV_OK)
 			continue;
@@ -297,12 +298,12 @@ dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num
 				continue;
 			if (dwarf_lineaddr(ln, &lineaddr, &de) != DW_DLV_OK)
 				continue;
-			if(address==lineaddr){
-				*line_num=lineno;
-				//printf("%-37s", basename(srcfiles[fn-1]));
-				*src_file=basename(srcfiles[fn - 1]);
+			if (address == lineaddr) {
+				*line_num = lineno;
+				// printf("%-37s", basename(srcfiles[fn-1]));
+				*src_file = basename(srcfiles[fn - 1]);
 			}
-			//printf("%-37s %11ju %#18jx\n",
+			// printf("%-37s %11ju %#18jx\n",
 			//  basename(srcfiles[fn - 1]), (uintmax_t) lineno,
 			//(uintmax_t) lineaddr);
 		}
@@ -312,23 +313,25 @@ dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Unsigned *line_num
 int
 search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 {
-	//Dwarf_Debug dbg = 0;
-	//Dwarf_Error err;
+	// Dwarf_Debug dbg = 0;
+	// Dwarf_Error err;
 	int fd_elf = -1;
-	//int fd_dwarf = -1;
-	//Dwarf_Arange *aranges;
-	//Dwarf_Signed cnt;
-	//Dwarf_Error de;
+	// int fd_dwarf = -1;
+	// Dwarf_Arange *aranges;
+	// Dwarf_Signed cnt;
+	// Dwarf_Error de;
 	Elf *e;
-	//uint64_t pc;
-	//Dwarf_Unsigned line_num;
-	//string src_file, namedie, line_numstr;
-	//Dwarf_Addr low, high;
-	//int valid=1;
+	// uint64_t pc;
+	// Dwarf_Unsigned line_num;
+	// string src_file, namedie, line_numstr;
+	// Dwarf_Addr low, high;
+	// int valid=1;
 
 	if (elf_version(EV_CURRENT) == EV_NONE)
-		errx (EXIT_FAILURE, "ELF library initialization"
-			"failed : %s ", elf_errmsg(-1));
+		errx(EXIT_FAILURE,
+		    "ELF library initialization"
+		    "failed : %s ",
+		    elf_errmsg(-1));
 
 	if ((fd_elf = open(progname, O_RDONLY)) < 0) {
 		perror("open");
@@ -342,20 +345,20 @@ search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 	//     return 1;
 	// }
 
-	if ((e = elf_begin(fd_elf , ELF_C_READ, NULL)) == NULL)
-		errx (EXIT_FAILURE , "elf_begin() failed : %s." ,
-			elf_errmsg (-1));
+	if ((e = elf_begin(fd_elf, ELF_C_READ, NULL)) == NULL)
+		errx(EXIT_FAILURE, "elf_begin() failed : %s.", elf_errmsg(-1));
 
-	// if (dwarf_init(fd_dwarf, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK) {
+	// if (dwarf_init(fd_dwarf, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK)
+	// {
 	//     fprintf(stderr, "Failed DWARF initialization\n");
 	//     return 1;
 	// }
 
-	*revised_addr=change_offset(address, e);
+	*revised_addr = change_offset(address, e);
 
-	//list_funcs_in_file(dbg, pc, &low, &high, &namedie, &valid);
+	// list_funcs_in_file(dbg, pc, &low, &high, &namedie, &valid);
 
-	//dump_dw_line_sfile(dbg, pc, &line_num, &src_file);
+	// dump_dw_line_sfile(dbg, pc, &line_num, &src_file);
 
 	// line_numstr = to_string(line_num);
 	// *dwarf_data="src file name: "+src_file+" line num: "+line_numstr;
@@ -370,7 +373,7 @@ search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 
 	elf_end(e);
 	close(fd_elf);
-	//close(fd_dwarf);
+	// close(fd_dwarf);
 
 	return 0;
 }

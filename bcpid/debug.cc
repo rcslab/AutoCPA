@@ -15,32 +15,31 @@
  */
 
 #include <assert.h>
+#include <pthread_np.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
-#include <signal.h>
-#include <pthread_np.h>
-
 #ifdef __MACH__
-#include <mach/mach.h>
 #include <mach/clock.h>
+#include <mach/mach.h>
 #endif
 
 #ifdef HAVE_EXECINFO
 #include <execinfo.h>
 #endif /* HAVE_EXECINFO */
 
-#include <string>
-#include <vector>
+#include <fstream>
+#include <iostream>
 #include <list>
 #include <map>
-#include <iostream>
-#include <fstream>
 #include <mutex>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "debug.h"
 
@@ -55,7 +54,8 @@
 static bool logInitialized = false;
 static std::fstream logStream;
 static std::mutex logLock;
-static std::map<void *, std::function<void(const std::string&)>> logOutputs = {};
+static std::map<void *, std::function<void(const std::string &)>>
+    logOutputs = {};
 static std::list<std::string> *logMessages = nullptr;
 
 void
@@ -77,8 +77,8 @@ get_timespec(struct timespec *ts)
 #define MAX_LOG 2048
 
 /*
- * Formats the log entries and append them to the log.  Messages are written to 
- * stderr if they are urgent enough (depending on build).  This function must 
+ * Formats the log entries and append them to the log.  Messages are written to
+ * stderr if they are urgent enough (depending on build).  This function must
  * not log, throw exceptions, or use our ASSERT, PANIC, NOT_IMPLEMENTED macros.
  */
 void
@@ -190,12 +190,15 @@ Debug_Terminate()
 		try {
 			rethrow_exception(exc);
 		} catch (std::exception const &e) {
-			Debug_Log(LEVEL_SYS, "Caught unhandled exception: %s\n", e.what());
+			Debug_Log(LEVEL_SYS, "Caught unhandled exception: %s\n",
+			    e.what());
 		} catch (...) {
-			Debug_Log(LEVEL_SYS, "Caught unhandled exception: (unknown type)");
+			Debug_Log(LEVEL_SYS,
+			    "Caught unhandled exception: (unknown type)");
 		}
 	} else {
-		Debug_Log(LEVEL_SYS, "Caught unhandled exception: (unable to determine)\n");
+		Debug_Log(LEVEL_SYS,
+		    "Caught unhandled exception: (unable to determine)\n");
 	}
 
 #ifdef HAVE_EXECINFO
@@ -210,7 +213,8 @@ Debug_Terminate()
 	}
 	free(names);
 #else
-	Debug_Log(LEVEL_SYS, "Backtrace not support not included in this build\n");
+	Debug_Log(
+	    LEVEL_SYS, "Backtrace not support not included in this build\n");
 #endif /* HAVE_EXECINFO */
 
 	abort();
@@ -240,7 +244,8 @@ Debug_SigHandler(int signum)
 	}
 	free(names);
 #else
-	Debug_Log(LEVEL_SYS, "Backtrace not support not included in this build\n");
+	Debug_Log(
+	    LEVEL_SYS, "Backtrace not support not included in this build\n");
 #endif /* HAVE_EXECINFO */
 
 	abort();
@@ -257,7 +262,8 @@ Debug_OpenLog(const std::string &logPath)
 	signal(SIGSEGV, Debug_SigHandler);
 	signal(SIGILL, Debug_SigHandler);
 
-	logStream.open(logPath.c_str(), std::fstream::in | std::fstream::out | std::fstream::app);
+	logStream.open(logPath.c_str(),
+	    std::fstream::in | std::fstream::out | std::fstream::app);
 	if (!logStream.is_open()) {
 		printf("Could not open logfile: %s\n", logPath.c_str());
 		return -1;
@@ -286,7 +292,8 @@ Debug_PrintHex(const std::string &data, off_t off, size_t limit)
 		printf("%08lx  ", row * row_size);
 		for (size_t col = 0; col < row_size; col++) {
 			size_t ix = row * row_size + col;
-			if ((limit != 0 && ix >= limit) || ix >= data.length()) {
+			if ((limit != 0 && ix >= limit) ||
+			    ix >= data.length()) {
 				stop = true;
 				for (; col < row_size; col++) {
 					printf("   ");
@@ -301,7 +308,8 @@ Debug_PrintHex(const std::string &data, off_t off, size_t limit)
 
 		for (size_t col = 0; col < row_size; col++) {
 			size_t ix = row * row_size + col;
-			if ((limit != 0 && ix >= limit) || ix >= data.length()) {
+			if ((limit != 0 && ix >= limit) ||
+			    ix >= data.length()) {
 				stop = true;
 				for (; col < row_size; col++) {
 					printf(" ");
