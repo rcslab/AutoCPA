@@ -1683,14 +1683,15 @@ main(int argc, const char *argv[])
 	bcpid_pmc_init(&b);
 
 	if (!bcpid_parse_options(&b, argc, argv)) {
-		return 0;
+		return EX_OK;
 	}
 
 	bcpid_setup_pmc(&b);
 	bcpid_main_loop(&b);
 	bcpid_shutdown(&b);
 	bcpid_report(&b);
-	return 0;
+
+	return EX_OK;
 }
 
 void

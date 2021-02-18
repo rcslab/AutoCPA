@@ -1,4 +1,4 @@
-SUBDIR = bcpid bcpiutil
+SUBDIR = libbcpi bcpid bcpiutil
 
 .include <bsd.subdir.mk>
 

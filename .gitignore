@@ -1,4 +1,6 @@
+*.a
 *.o
+*.po
 *.debug
 *.full
 *.bin

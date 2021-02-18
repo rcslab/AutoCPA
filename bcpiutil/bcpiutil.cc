@@ -2,9 +2,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include <dwarf.h>
 #include <errno.h>
 #include <libdwarf.h>
+#include <libelf.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,20 +24,16 @@
 
 struct util_query_parameter {
 	std::vector<const char *> file_names;
-	// const char *file_name;
 	const char *counter_name;
 	// object files containing this string in their names will be included
 	// for traversal
 	const char *object_name;
-
 	int counter_index;
-
 	// Show this many top nodes when pretty printing call graph.
 	int top_n_node;
 	int max_depth;
 	// Show this many top edges when pretty printing call graph.
 	int top_n_edge;
-
 	// Whether the utility should just calculate checksum and exit.
 	bool do_checksum;
 };
@@ -53,7 +49,7 @@ util_print_spaces(int n)
  */
 
 bool
-uitl_check_recurse_condition(
+util_check_recurse_condition(
     struct util_query_parameter *u, int cur_level, struct bcpi_node *n)
 {
 	int index = u->counter_index;
@@ -138,7 +134,7 @@ util_traverse(
 		    from->object->path);
 		// cout << check_addr(from->object->path, debug_info.c_str(),
 		// from->node_address) << endl;
-		if (uitl_check_recurse_condition(u, cur_level + 1, from)) {
+		if (util_check_recurse_condition(u, cur_level + 1, from)) {
 			util_traverse(u, cur_level + 1, from);
 		}
 	}
@@ -150,9 +146,11 @@ util_process(struct util_query_parameter *u)
 	if (u->file_names.size() == 0) {
 		return;
 	}
+
 	if (!u->counter_name) {
 		return;
 	}
+
 	// If merely do checksum, do so then exit.
 	if (u->do_checksum) {
 		int file_fd = open(u->file_names[0], O_RDONLY | O_CLOEXEC);
@@ -227,7 +225,6 @@ util_process(struct util_query_parameter *u)
 	FILE *f = fopen(filename.c_str(), "w");
 	if (!f) {
 		perror("fopen");
-		printf("error in openfile");
 	}
 
 	for (int i = 0; i < traverse_node; ++i) {
@@ -249,16 +246,11 @@ util_process(struct util_query_parameter *u)
 		// n->node_address); string debug_info =
 		// util_get_object_path(n->object->path); cout<<"This is
 		// T"<<endl;
-		bcpi_show_node_info(
-		    records[0], n, u->counter_name); // ino khodam hazf
-		// kardam,vali ba code e taghir yafte ham kar mikone
-		// cout<<"This is TT"<<endl;
-		// util_traverse(u, 1, n);
+		bcpi_show_node_info(records[0], n, u->counter_name);
 	}
-	int status = fclose(f);
-	if (status) {
+
+	if (fclose(f)) {
 		perror("fclose");
-		printf("error in closefile");
 	}
 }
 
@@ -266,20 +258,21 @@ void
 util_show_help()
 {
 	fprintf(stderr,
-	    "Help: "
-	    "  -h (Show this help)\n"
-	    "  -n n (show top n nodes)\n"
-	    "  -d d (traverse up to d levels deep)\n"
-	    "  -e e (show top e edges)\n"
-	    "  -o o (only show object at o)\n"
-	    "  -c c (show callchain concerning counter name c)\n"
-	    "  -k file (compute checksum of file)\n"
-	    "  -f name (process file with name)\n");
+	    "Usage: "
+	    "\t-h -- Show this help\n"
+	    "\t-n n -- Show top n nodes\n"
+	    "\t-d d -- Traverse up to d levels deep\n"
+	    "\t-e e -- Show top e edges\n"
+	    "\t-o o -- Only show object at o\n"
+	    "\t-c c -- Show callchain concerning counter name c\n"
+	    "\t-k file -- Compute checksum of file\n"
+	    "\t-f name -- Process file with name\n");
 }
 
 int
 main(int argc, char **argv)
 {
+	int opt;
 	struct util_query_parameter _util_conf, *util_conf = &_util_conf;
 
 	// util_conf->file_name = 0;
@@ -290,19 +283,12 @@ main(int argc, char **argv)
 	util_conf->max_depth = 5;
 	util_conf->do_checksum = false;
 
-	int c = 1;
-	while (c) {
-		c = getopt(argc, argv, "hf:n:d:e:c:o:k:");
-		if (c == -1) {
-			break;
-		}
-
-		switch (c) {
+	while ((opt = getopt(argc, argv, "hf:n:d:e:c:o:k:")) != -1) {
+		switch (opt) {
 		case 'h':
 			util_show_help();
 			break;
 		case 'f':
-			// util_conf->file_name = strdup(optarg);
 			util_conf->file_names.push_back(strdup(optarg));
 			break;
 		case 'n':
@@ -321,7 +307,6 @@ main(int argc, char **argv)
 			util_conf->object_name = strdup(optarg);
 			break;
 		case 'k':
-			// util_conf->file_name = strdup(optarg);
 			util_conf->file_names.push_back(strdup(optarg));
 			util_conf->do_checksum = true;
 			break;
@@ -335,9 +320,5 @@ main(int argc, char **argv)
 		return 0;
 	}
 
-	std::cout << "size of file name vector: "
-		  << util_conf->file_names.size() << "\n";
-	// cout<<"print vector file name: "<<util_conf->file_names[0]<<endl;
-	// cout<<"print vector file name: "<<util_conf->file_names[1]<<endl;
 	util_process(util_conf);
 }

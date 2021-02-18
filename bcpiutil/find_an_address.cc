@@ -116,7 +116,6 @@ load_sections(Elf *e, size_t shnum)
 	return sl;
 }
 
-// redundant comment
 uint64_t
 change_offset(uint64_t num, Elf *e)
 {
@@ -143,189 +142,17 @@ change_offset(uint64_t num, Elf *e)
 		} // here we dont consider the case that num corresponds to the
 		  // last section offset
 	}
+
 	dwarfoff = calculate_nums(address, newnum, num);
+
 	return dwarfoff;
-}
-
-/* List a function if it's in the given DIE.
- */
-void
-list_func_in_die(Dwarf_Debug dgb, Dwarf_Die the_die, Dwarf_Addr address,
-    Dwarf_Addr *low_pc, Dwarf_Addr *high_pc, std::string *diename, int *valid)
-{
-	char *die_name = 0;
-	const char *tag_name = 0;
-	Dwarf_Error err;
-	Dwarf_Half tag;
-	Dwarf_Attribute *attrs;
-	Dwarf_Addr lowpc, highpc;
-	Dwarf_Signed attrcount, i;
-	int rc = dwarf_diename(the_die, &die_name, &err);
-
-	if (rc == DW_DLV_ERROR)
-		std::cout << "Error in dwarf_diename\n";
-	else if (rc == DW_DLV_NO_ENTRY)
-		return;
-
-	if (dwarf_tag(the_die, &tag, &err) != DW_DLV_OK)
-		std::cout << "Error in dwarf_tag\n";
-
-	/* Only interested in subprogram DIEs here */
-	if (tag != DW_TAG_subprogram)
-		return;
-
-	if (dwarf_get_TAG_name(tag, &tag_name) != DW_DLV_OK)
-		std::cout << "Error in dwarf_get_TAG_name\n";
-
-	// printf("DW_TAG_subprogram: '%s'\n", die_name);
-
-	/* Grab the DIEs attributes for display */
-	if (dwarf_attrlist(the_die, &attrs, &attrcount, &err) != DW_DLV_OK)
-		std::cout << "Error in dwarf_attlist\n";
-
-	for (i = 0; i < attrcount; ++i) {
-		Dwarf_Half attrcode;
-		if (dwarf_whatattr(attrs[i], &attrcode, &err) != DW_DLV_OK)
-			std::cout << "Error in dwarf_whatattr\n";
-
-		/* We only take some of the attributes for display here.
-		** More can be picked with appropriate tag constants.
-		*/
-		if (attrcode == DW_AT_low_pc)
-			dwarf_formaddr(attrs[i], &lowpc, 0);
-		else if (attrcode == DW_AT_high_pc)
-			dwarf_formaddr(attrs[i], &highpc, 0);
-	}
-
-	if ((lowpc == address) || (address == highpc)) {
-		// chon man fght esme function ha ro mikham dar nahayat, pas
-		// sharte if ro age fght address == lowpc ya address ==highpc
-		// bezaram okeye
-		*low_pc = lowpc;
-		*high_pc = highpc;
-		*diename = die_name;
-		*valid = 0;
-		// printf("DW_TAG_subprogram: '%s'\n", die_name);
-		// printf("low pc  : 0x%08llx\n",(unsigned long long) lowpc);
-		// printf("high pc : 0x%08llx\n",(unsigned long long) highpc);
-	}
-}
-
-/* List all the functions from the file represented by the given descriptor.
- */
-void
-list_funcs_in_file(Dwarf_Debug dbg, Dwarf_Addr address, Dwarf_Addr *low,
-    Dwarf_Addr *high, std::string *namedie, int *valid)
-{
-	Dwarf_Unsigned cu_header_length, abbrev_offset, next_cu_header;
-	Dwarf_Half version_stamp, address_size;
-	Dwarf_Error err;
-	Dwarf_Die no_die = 0, cu_die, child_die;
-
-	while (1) {
-		/* Find a compilation unit header */
-		// cerr << "haha\n";
-		int temp;
-		temp = dwarf_next_cu_header(dbg, &cu_header_length,
-		    &version_stamp, &abbrev_offset, &address_size,
-		    &next_cu_header, &err);
-		if (temp == DW_DLV_ERROR)
-			std::cout << "Error reading DWARF cu header\n";
-		if (temp == DW_DLV_NO_ENTRY) {
-			// cerr << "here we are at the end of all CUs\n";
-			break;
-		}
-
-		/* Find the CU DIE of current CU */
-		if (dwarf_siblingof(dbg, no_die, &cu_die, &err) == DW_DLV_ERROR)
-			std::cout << "Error getting sibling of CU\n";
-
-		/* Expect the CU DIE to have children- children at level 1 */
-		if (dwarf_child(cu_die, &child_die, &err) == DW_DLV_ERROR)
-			std::cout << "Error getting child of CU DIE\n";
-
-		/* Now go over all children DIEs */
-		while (1) {
-			int rc;
-
-			list_func_in_die(
-			    dbg, child_die, address, low, high, namedie, valid);
-			rc = dwarf_siblingof(dbg, child_die, &child_die, &err);
-
-			if (rc == DW_DLV_ERROR)
-				std::cout << "Error getting sibling of DIE\n";
-			else if (rc == DW_DLV_NO_ENTRY)
-				break; /* done */
-		}
-	}
-}
-
-static void
-dump_dw_line_sfile(Dwarf_Debug dbg, Dwarf_Addr address,
-    Dwarf_Unsigned *line_num, std::string *src_file)
-{
-	Dwarf_Die die;
-	Dwarf_Line *linebuf, ln;
-	Dwarf_Addr lineaddr;
-	Dwarf_Signed linecount, srccount;
-	Dwarf_Unsigned lineno, fn;
-	Dwarf_Error de;
-	const char *dir, *file;
-	char **srcfiles;
-	int i, ret;
-
-	while ((ret = dwarf_next_cu_header(
-		    dbg, NULL, NULL, NULL, NULL, NULL, &de)) == DW_DLV_OK) {
-		if (dwarf_siblingof(dbg, NULL, &die, &de) != DW_DLV_OK)
-			continue;
-		if (dwarf_attrval_string(die, DW_AT_name, &file, &de) !=
-		    DW_DLV_OK)
-			file = NULL;
-		if (dwarf_attrval_string(die, DW_AT_comp_dir, &dir, &de) !=
-		    DW_DLV_OK)
-			dir = NULL;
-		// printf("%-37s %11s   %s\n", "Filename", "Line Number",
-		//  "Starting Address");
-		if (dwarf_srclines(die, &linebuf, &linecount, &de) != DW_DLV_OK)
-			continue;
-		if (dwarf_srcfiles(die, &srcfiles, &srccount, &de) != DW_DLV_OK)
-			continue;
-		for (i = 0; i < linecount; i++) {
-			ln = linebuf[i];
-			if (dwarf_line_srcfileno(ln, &fn, &de) != DW_DLV_OK)
-				continue;
-			if (dwarf_lineno(ln, &lineno, &de) != DW_DLV_OK)
-				continue;
-			if (dwarf_lineaddr(ln, &lineaddr, &de) != DW_DLV_OK)
-				continue;
-			if (address == lineaddr) {
-				*line_num = lineno;
-				// printf("%-37s", basename(srcfiles[fn-1]));
-				*src_file = basename(srcfiles[fn - 1]);
-			}
-			// printf("%-37s %11ju %#18jx\n",
-			//  basename(srcfiles[fn - 1]), (uintmax_t) lineno,
-			//(uintmax_t) lineaddr);
-		}
-	}
 }
 
 int
 search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 {
-	// Dwarf_Debug dbg = 0;
-	// Dwarf_Error err;
 	int fd_elf = -1;
-	// int fd_dwarf = -1;
-	// Dwarf_Arange *aranges;
-	// Dwarf_Signed cnt;
-	// Dwarf_Error de;
 	Elf *e;
-	// uint64_t pc;
-	// Dwarf_Unsigned line_num;
-	// string src_file, namedie, line_numstr;
-	// Dwarf_Addr low, high;
-	// int valid=1;
 
 	if (elf_version(EV_CURRENT) == EV_NONE)
 		errx(EXIT_FAILURE,
@@ -339,41 +166,13 @@ search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 		return 1;
 	}
 
-	// if ((fd_dwarf = open(dbg_path, O_RDONLY)) < 0) {
-	//     perror("open");
-	//     std::cerr << "error in fd_dwarf\n";
-	//     return 1;
-	// }
-
 	if ((e = elf_begin(fd_elf, ELF_C_READ, NULL)) == NULL)
 		errx(EXIT_FAILURE, "elf_begin() failed : %s.", elf_errmsg(-1));
 
-	// if (dwarf_init(fd_dwarf, DW_DLC_READ, 0, 0, &dbg, &err) != DW_DLV_OK)
-	// {
-	//     fprintf(stderr, "Failed DWARF initialization\n");
-	//     return 1;
-	// }
-
 	*revised_addr = change_offset(address, e);
-
-	// list_funcs_in_file(dbg, pc, &low, &high, &namedie, &valid);
-
-	// dump_dw_line_sfile(dbg, pc, &line_num, &src_file);
-
-	// line_numstr = to_string(line_num);
-	// *dwarf_data="src file name: "+src_file+" line num: "+line_numstr;
-	// if (valid==0){
-	//   *dwarf_data = *dwarf_data +" name of subprogram: "+ namedie;
-	// }
-	// std::cout << *dwarf_data << "\n";
-	// if (dwarf_finish(dbg, &err) != DW_DLV_OK) {
-	//     fprintf(stderr, "Failed DWARF finalization\n");
-	//     return 1;
-	// }
 
 	elf_end(e);
 	close(fd_elf);
-	// close(fd_dwarf);
 
 	return 0;
 }
