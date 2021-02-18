@@ -400,13 +400,10 @@ def read_csv(path):
         raise(Exception("Error in reading CSV file. Please check the input path"))
 
 
-def unpickle_table(cp):
+def unpickle_table(cp, pickle_path):
     global lst_map
-    #pickleFile = open("C:/Users/Zahra/Desktop/"+cp.getName()+".pkl", 'rb')
-    #pickleFile = open("/net/charm/usr/home/zahra/zahra_rem/bcpinew/"+cp.getName()+".pkl", 'rb')
-    pickleFile = open("/net/charm/usr/home/zahra/mantou/" +
-                      cp.getName()+".pkl", 'rb')
-    lst_map = pickle.load(pickleFile)
+    with open(pickle_path, 'rb') as pickleFile:
+        lst_map = pickle.load(pickleFile)
 
 
 def main(currentProgram):
@@ -430,10 +427,11 @@ def main(currentProgram):
 
     start_time = time.time()
 
-    data = read_csv(
-        "/net/charm/usr/home/zahra/zahra_rem/bcpinew/address_info.csv")
+    csv_path = getScriptArgs()[0]
+    pickle_path = getScriptArgs()[1]
+    data = read_csv(csv_path)
     gbcpi = ghidra_bcpi(currentProgram)
-    unpickle_table(currentProgram)
+    unpickle_table(currentProgram, pickle_path)
 
     # print lst_map["0025d571"]
     for i in range(len(data)):

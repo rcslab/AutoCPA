@@ -116,10 +116,7 @@ def main():
     all_files = get_files()
     filtered_files = filter(startend_dates, all_files)
     path2 = create_path(filtered_files, progname, countername, nodenum)
-    os.chdir("/net/charm/usr/home/zahra/zahra_rem/bcpinew")
-    print(path2)
     os.system(path2)
-    return
 
 
 if __name__ == "__main__":

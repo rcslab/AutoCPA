@@ -98,8 +98,7 @@ def main(currentProgram):
     start_time = time.time()
     gbcpi = ghidra_bcpi(currentProgram)
     gbcpi.getUsesofAllFilteredStructures()
-    f_path = "/net/charm/usr/home/zahra/mantou/"+currentProgram.getName()+".pkl"
-    # f_path="C:/Users/Zahra/Desktop/"+currentProgram.getName()+".pkl"
+    f_path = getScriptArgs()[0]
     f = open(f_path, "wb")
     pickle.dump(lst_map, f)
     f.close()
