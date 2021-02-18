@@ -68,20 +68,6 @@ util_check_recurse_condition(
 	return true;
 }
 
-// string check_addr(const char *object_path, const char *debug_file_path,
-// uint64_t offset) {
-//     int rc=-1;
-//     string dw_data;
-
-//     rc = search_symbol(object_path, debug_file_path, offset, &dw_data);
-
-//     if (rc==1)
-//         return "error in srchsymbol";
-//     if (rc==0)
-//         return dw_data;
-//     return "";
-// }
-
 uint64_t
 get_revised_addr(const char *object_path, uint64_t offset)
 {

@@ -1,4 +1,8 @@
+#!/usr/bin/env python
+
+# Example:
 # python query.py -d 2020-03-14_22:49:00 2020-03-18_23:05:00 -p v3_bb3 -c mem_load_retired.l1_miss -n 300
+
 import pandas as pd
 import numpy as np
 import glob
@@ -6,8 +10,7 @@ import os
 import argparse
 import datetime
 
-
-path = "./tmp"
+path = "/var/tmp"
 
 
 def process_args(l):
@@ -23,7 +26,6 @@ def process_args(l):
         hour = int(name[11:13])
         minute = int(name[14:16])
         second = int(name[17:19])
-        # data.iloc[i, 1:]=[year, month, day, hour, minute, second]
         data.iloc[i, 1] = datetime.datetime(
             year, month, day, hour, minute, second)
     data = data["time"]
@@ -31,7 +33,6 @@ def process_args(l):
 
 
 def get_inputs():
-
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--date", nargs=2, metavar=('date1', 'date2'),
                         help="Enter the starting data and the ending date")
@@ -83,40 +84,33 @@ def reframe(ff):
         second = int(name[17:19])
         data.iloc[i, 1] = datetime.datetime(
             year, month, day, hour, minute, second)
-        # data.iloc[i, 1:]=[year, month, day, hour, minute, second]
+
     return data
 
 
 def get_files():
-    cwd = os.getcwd()
-    print("Current working directory %s" % cwd)
-    os.chdir(path)
-    cwd = os.getcwd()
-    print("Directory changed successfully %s" % cwd)
+    files = []
+    for f in glob.glob(path+"/bcpi_*.bin"):
+        files.append(f)
 
-    f = []
-    for file in glob.glob("*.rcs.uwaterloo.ca.bin"):
-        f.append(file)
-
-    return reframe(f)
+    return reframe(files)
 
 
 def create_path(files, progname, countername, nodenum):
-    mid_path = ""
+    args = ""
     for i in range(0, len(files)):
-        mid_path += " -f tmp//"+files[i]
-    path2 = "./bcpiutil/bcpiutil"+mid_path
-    path2 = path2+" -c "+countername+" -o "+progname+" -n "+str(nodenum)
-
-    return path2
+        args += " -f " + files[i]
+    cmd = "./bcpiutil/bcpiutil" + args
+    cmd += " -c " + countername + " -o " + progname + " -n " + str(nodenum)
+    return cmd
 
 
 def main():
     startend_dates, progname, countername, nodenum = get_inputs()
     all_files = get_files()
     filtered_files = filter(startend_dates, all_files)
-    path2 = create_path(filtered_files, progname, countername, nodenum)
-    os.system(path2)
+    cmd = create_path(filtered_files, progname, countername, nodenum)
+    os.system(cmd)
 
 
 if __name__ == "__main__":
