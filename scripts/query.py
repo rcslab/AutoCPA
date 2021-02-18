@@ -10,8 +10,6 @@ import os
 import argparse
 import datetime
 
-path = "/var/tmp"
-
 
 def process_args(l):
     size = np.zeros((len(l), 2))
@@ -34,19 +32,24 @@ def process_args(l):
 
 def get_inputs():
     parser = argparse.ArgumentParser()
+
+    parser.add_argument("-C", "--dir", default="/var/tmp", type=str, action='store',
+                        help="The directory containing bcpid data")
+
     parser.add_argument("-d", "--date", nargs=2, metavar=('date1', 'date2'),
                         help="Enter the starting data and the ending date")
 
-    parser.add_argument("-p", "--program", nargs=1, type=str, action='store', dest='program',
+    parser.add_argument("-p", "--program", type=str, action='store', dest='program',
                         help="Enter the program you want to monitor")
 
-    parser.add_argument("-c", "--counter", nargs=1, type=str, action='store', dest='counter',
+    parser.add_argument("-c", "--counter", type=str, action='store', dest='counter',
                         help="Enter the performance counter you want to monitor")
 
-    parser.add_argument("-n", "--topnodes", nargs=1, type=int, action='store', dest='nodenum',
+    parser.add_argument("-n", "--topnodes", type=int, action='store', dest='nodenum',
                         help="Enter the number of top nodes you want to monitor")
 
     args = parser.parse_args()
+    dir = args.dir
     progname = args.program
     countername = args.counter
     nodenum = args.nodenum
@@ -54,17 +57,14 @@ def get_inputs():
     listofdates = [date11, date22]
     arg_dates = process_args(listofdates)
 
-    return arg_dates, progname[0], countername[0], nodenum[0]
+    return arg_dates, dir, progname, countername, nodenum
 
 
 def filter(startend_dates, all_files):
 
     filtered = all_files[(all_files["time"] <= startend_dates.iloc[1]) & (
         all_files["time"] >= startend_dates.iloc[0])]
-
     filtered = filtered["name"].tolist()
-    print(filtered)
-    print(len(filtered))
     return filtered
 
 
@@ -88,26 +88,23 @@ def reframe(ff):
     return data
 
 
-def get_files():
-    files = []
-    for f in glob.glob(path+"/bcpi_*.bin"):
-        files.append(f)
-
+def get_files(dir):
+    files = glob.glob(dir + "/bcpi_*.bin")
     return reframe(files)
 
 
 def create_path(files, progname, countername, nodenum):
-    args = ""
-    for i in range(0, len(files)):
-        args += " -f " + files[i]
-    cmd = "./bcpiutil/bcpiutil" + args
-    cmd += " -c " + countername + " -o " + progname + " -n " + str(nodenum)
-    return cmd
+    mid_path = ""
+    for file in files:
+        mid_path += " -f " + file
+    path2 = "./bcpiutil/bcpiutil" + mid_path
+    path2 = path2 + " -c " + countername + " -o " + progname + " -n " + str(nodenum)
+    return path2
 
 
 def main():
-    startend_dates, progname, countername, nodenum = get_inputs()
-    all_files = get_files()
+    startend_dates, dir, progname, countername, nodenum = get_inputs()
+    all_files = get_files(dir)
     filtered_files = filter(startend_dates, all_files)
     cmd = create_path(filtered_files, progname, countername, nodenum)
     os.system(cmd)
