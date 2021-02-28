@@ -225,7 +225,7 @@ util_process(struct util_query_parameter *u)
 		printf("* %ld: %lx (%s) ", value,
 		    get_revised_addr(n->object->path, n->node_address),
 		    n->object->path);
-		fprintf(f, "%ld, %lx\n", value,
+		fprintf(f, "%ld,%lx\n", value,
 		    get_revised_addr(n->object->path, n->node_address));
 		// printf("* %ld: %lx (%s) ", value, n->node_address,
 		// n->object->path); fprintf(f, "%ld, %lx\n", value,
