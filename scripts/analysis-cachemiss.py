@@ -402,8 +402,11 @@ def read_csv(path):
 
 def unpickle_table(cp, pickle_path):
     global lst_map
-    with open(pickle_path, 'rb') as pickleFile:
-        lst_map = pickle.load(pickleFile)
+    with open(pickle_path, 'rb') as csvfile:
+        csvreader = csv.reader(csvfile)
+        for row in csvreader:
+            address, path, offset, cat_path, cat_name = row
+            lst_map[address].append((path, int(offset), cat_path, cat_name))
 
 
 def main(currentProgram):
