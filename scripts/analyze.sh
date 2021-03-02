@@ -10,10 +10,9 @@ fi
 ROOT=$(cd "$(dirname "$0")"/.. && pwd)
 FULL=$1
 SHORT=$(basename "$FULL")
-HEADLESS=/usr/local/share/ghidra/support/analyzeHeadless
+GHIDRA_HEADLESS=${GHIDRA_HEADLESS:-/usr/local/share/ghidra/support/analyzeHeadless}
 
 mkdir -p "$ROOT/ghidra-projects"
 
-$HEADLESS "$ROOT/ghidra-projects" "$SHORT" -import "$FULL" -postScript DWARF_ExtractorScript.java
-$HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$ROOT/data/address_info.csv" "$ROOT/data/lst_map.csv"
-$HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -noanalysis -scriptPath "$ROOT" -postScript scripts/analysis-cachemiss.py "$ROOT/data/address_info.csv" "$ROOT/data/lst_map.csv"
+$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -import "$FULL" -postScript DWARF_ExtractorScript.java
+$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$ROOT/data/address_info.csv" "$ROOT/data/lst_map.csv"
