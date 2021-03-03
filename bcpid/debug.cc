@@ -51,6 +51,7 @@
  *
  ********************************************************************/
 
+static bool detached = false;
 static bool logInitialized = false;
 static std::fstream logStream;
 static std::mutex logLock;
@@ -131,13 +132,15 @@ Debug_Log(int level, const char *fmt, ...)
 
 	logLock.lock();
 
+	if (!detached) {
 #ifdef BCPID_DEBUG
-	if (level <= LEVEL_MSG)
-		std::cerr << buf;
+		if (level <= LEVEL_MSG)
+			std::cerr << buf;
 #else /* RELEASE or PERF */
-	if (level <= LEVEL_ERR)
-		std::cerr << buf + off;
+		if (level <= LEVEL_ERR)
+			std::cerr << buf + off;
 #endif
+	}
 
 	// Rolling buffer of the last N messages
 	if (logMessages == nullptr) {
@@ -272,6 +275,12 @@ Debug_OpenLog(const std::string &logPath)
 	logInitialized = true;
 
 	return 0;
+}
+
+void
+Debug_Detach()
+{
+	detached = true;
 }
 
 /*

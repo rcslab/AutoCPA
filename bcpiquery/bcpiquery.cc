@@ -244,7 +244,7 @@ void
 util_show_help()
 {
 	fprintf(stderr,
-	    "Usage: "
+	    "Usage: bcpiquery OPTS"
 	    "\t-h -- Show this help\n"
 	    "\t-n n -- Show top n nodes\n"
 	    "\t-d d -- Traverse up to d levels deep\n"

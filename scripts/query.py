@@ -97,7 +97,7 @@ def create_path(files, progname, countername, nodenum):
     mid_path = ""
     for file in files:
         mid_path += " -f " + file
-    path2 = "./bcpiutil/bcpiutil" + mid_path
+    path2 = "./bcpiquery/bcpiquery" + mid_path
     path2 = path2 + " -c " + countername + " -o " + progname + " -n " + str(nodenum)
     return path2
 

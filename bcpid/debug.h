@@ -119,6 +119,7 @@
 #endif /* _WIN32 */
 
 int Debug_OpenLog(const std::string &logPath);
+void Debug_Detach();
 void Debug_Log(int level, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 void Debug_Perror(const char *fmt, int err);

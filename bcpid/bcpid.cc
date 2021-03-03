@@ -9,6 +9,7 @@
 #include <sys/user.h>
 #include <sys/utsname.h>
 
+#include <err.h>
 #include <fcntl.h>
 #include <libprocstat.h>
 #include <pmc.h>
@@ -95,12 +96,12 @@ bcpid_signal_init(void (*signal_handler)(int num))
 // Force sample data to be saved on disk and
 // purged from main memory when number of call graph
 // edges exceeds this number
-#define BCPID_EDGE_GC_THRESHOLD 10000
+#define BCPID_EDGE_GC_THRESHOLD 100000
 
 // Force sample data to be saved on disk and
 // purged from main memory when number of call graph
 // nodes exceeds this number
-#define BCPID_NODE_GC_THRESHOLD 10000
+#define BCPID_NODE_GC_THRESHOLD 100000
 
 // For performance reasons, hashes of object files are cached
 // To prevent cache from growing unbounded, it is cleared
@@ -241,6 +242,8 @@ struct bcpid_hash_cache {
 	struct timespec last_modified;
 	bcpi_hash hash;
 };
+
+bool foreground = false;
 
 struct bcpid {
 	int num_pmclog_event;
@@ -1377,6 +1380,20 @@ bcpid_start_all(struct bcpid *b)
 }
 
 void
+bcpid_help()
+{
+	printf("alloc       Allocate a new PMC\n");
+	printf("release     Release a PMC\n");
+	printf("pmcs        Show all supported PMCs\n");
+	printf("debug       Show statistics\n");
+	printf("save        Save collected data\n");
+	printf("start       Start all PMCs\n");
+	printf("stop        Stop all PMCs\n");
+	printf("quit        Exit bcpid\n");
+	printf("help        Show this message\n");
+}
+
+void
 bcpid_handle_stdin(struct bcpid *b)
 {
 	char line[128];
@@ -1429,15 +1446,8 @@ bcpid_handle_stdin(struct bcpid *b)
 		bcpid_start_all(b);
 	} else if (!strcmp(arg, "quit")) {
 		g_quit = 1;
-	} else if (!strcmp(arg, "leak")) {
-		char *times = strtok(0, delim);
-		if (!times) {
-			goto fail;
-		}
-		int time = atoi(times);
-		for (int i = 0; i < time; ++i) {
-			bcpid_save(b);
-		}
+	} else if (!strcmp(arg, "help")) {
+		bcpid_help();
 	} else {
 		MSG("unknown command: %s", arg);
 	}
@@ -1615,8 +1625,10 @@ usage()
 	    "\t-c count -- Sampling interval\n"
 	    "\t-h -- Help\n"
 	    "\t-o dir -- Output director\n"
-	    "\t-l -- List PMCs\n"
-	    "\t-p pmc[, ...] -- List of pmc to monitor\n");
+	    "\t-L -- List PMCs\n"
+	    "\t-p pmc -- PMC to monitor\n"
+	    "\t-f -- Foreground\n"
+	    "\t-l logfile -- Log bcpi daemon\n");
 }
 
 bool
@@ -1624,6 +1636,9 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 {
 	int opt;
 	struct stat s;
+
+	// XXX: Hack since we get lots of errors in libpmcstat
+	err_set_file(fopen("/dev/null", "w"));
 
 	b->default_count = BCPID_DEFAULT_COUNT;
 	b->default_pmc = "";
@@ -1633,7 +1648,7 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 	b->node_collect_threshold = BCPID_NODE_GC_THRESHOLD;
 	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
 
-	while ((opt = getopt(argc, (char **)argv, "hc:p:lo:")) != -1) {
+	while ((opt = getopt(argc, (char **)argv, "hc:p:l:Lo:f")) != -1) {
 		switch (opt) {
 		case 'c':
 			b->default_count = atoi(optarg);
@@ -1642,7 +1657,7 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 			usage();
 			exit(EX_OK);
 		}
-		case 'l': {
+		case 'L': {
 			bcpid_printcpu();
 			exit(EX_OK);
 		}
@@ -1653,6 +1668,14 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 		}
 		case 'o': {
 			b->default_output_dir = strdup(optarg);
+			break;
+		}
+		case 'l': {
+			Debug_OpenLog(optarg);
+			break;
+		}
+		case 'f': {
+			foreground = true;
 			break;
 		}
 		default:
@@ -1684,6 +1707,17 @@ main(int argc, const char *argv[])
 
 	if (!bcpid_parse_options(&b, argc, argv)) {
 		return EX_OK;
+	}
+
+	if (!foreground) {
+		pid_t p = fork();
+		if (p < 0) {
+			PERROR("fork");
+			exit(EX_OSERR);
+		}
+		if (p != 0)
+			exit(EX_OK);
+		Debug_Detach();
 	}
 
 	bcpid_setup_pmc(&b);
