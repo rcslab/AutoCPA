@@ -1,8 +1,8 @@
 #!/bin/sh
 
-if [ $# -ne 1 ]; then
+if [ $# -lt 1 ]; then
     cat >&2 <<EOF
-Usage: $0 /path/to/binary
+Usage: $0 /path/to/binary [OPTS]
 EOF
     exit 1
 fi
@@ -15,4 +15,6 @@ GHIDRA_HEADLESS=${GHIDRA_HEADLESS:-/usr/local/share/ghidra/support/analyzeHeadle
 mkdir -p "$ROOT/ghidra-projects"
 
 $GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -import "$FULL" -postScript DWARF_ExtractorScript.java
-$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$ROOT/data/address_info.csv" "$ROOT/data/lst_map.csv"
+
+shift
+$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$ROOT/data/address_info.csv" "$@"

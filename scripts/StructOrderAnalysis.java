@@ -53,7 +53,8 @@ public class StructOrderAnalysis extends GhidraScript {
 	@Override
 	public void run() throws Exception {
 		// Read address_info.csv to find relevant addresses
-		Path csv = Paths.get(getScriptArgs()[0]);
+		String[] args = getScriptArgs();
+		Path csv = Paths.get(args[0]);
 		BcpiData data = BcpiData.parse(csv, this.currentProgram);
 
 		// Get the decompilation of each function containing an address
@@ -65,10 +66,27 @@ public class StructOrderAnalysis extends GhidraScript {
 		// Use our collected data to infer field access patterns
 		AccessPatterns patterns = AccessPatterns.collect(this.currentProgram, data, refs, this.monitor);
 
-		// Try to optimize struct layouts
-		for (Structure struct : patterns.getStructures()) {
-			Structure optimized = patterns.optimize(struct);
-			prettyPrint(optimized);
+		if (args.length > 1) {
+			String regex = args[1];
+			for (Structure struct : patterns.getStructures()) {
+				if (!struct.getName().matches(regex)) {
+					continue;
+				}
+
+				System.out.print("Found these access patterns:\n\n");
+				for (AccessPattern pattern : patterns.getPatterns(struct)) {
+					int count = patterns.getCount(struct, pattern);
+					System.out.format("%s (%d times)\n", pattern, count);
+				}
+
+				System.out.print("\nSuggested layout:\n\n");
+				prettyPrint(patterns.optimize(struct));
+			}
+		} else {
+			System.out.print("Found data for these structs:\n\n");
+			for (Structure struct : patterns.getStructures()) {
+				System.out.println(struct.getName());
+			}
 		}
 	}
 
@@ -80,7 +98,7 @@ public class StructOrderAnalysis extends GhidraScript {
 				System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
 			}
 		}
-		System.out.format("};\n\n");
+		System.out.format("};\n");
 	}
 }
 
@@ -337,6 +355,27 @@ class AccessPattern {
 	}
 
 	@Override
+	public String toString() {
+		StringBuilder result = new StringBuilder();
+
+		DataType struct = null;
+		for (DataTypeComponent field : this.fields) {
+			if (struct == null) {
+				struct = field.getParent();
+				result.append(struct.getName())
+					.append("::{");
+			} else {
+				result.append(", ");
+			}
+			result.append(field.getFieldName());
+		}
+
+		return result
+			.append("}")
+			.toString();
+	}
+
+	@Override
 	public boolean equals(Object obj) {
 		if (obj == this) {
 			return true;
@@ -406,6 +445,20 @@ class AccessPatterns {
 	 */
 	Set<Structure> getStructures() {
 		return this.patterns.keySet();
+	}
+
+	/**
+	 * @return All the access patterns we saw for a structure.
+	 */
+	Set<AccessPattern> getPatterns(Structure struct) {
+		return this.patterns.get(struct).elementSet();
+	}
+
+	/**
+	 * @return The number of occurrences of an access pattern.
+	 */
+	int getCount(Structure struct, AccessPattern pattern) {
+		return this.patterns.get(struct).count(pattern);
 	}
 
 	/**
