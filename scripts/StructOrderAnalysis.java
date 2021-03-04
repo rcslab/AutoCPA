@@ -193,7 +193,7 @@ class FieldReferences {
 	private void collect(TaskMonitor monitor) throws Exception {
 		QCallback callback = new QCallback();
 		try {
-			ParallelDecompiler.decompileFunctions(callback, functions, monitor);
+			ParallelDecompiler.decompileFunctions(callback, this.program, this.functions, monitor);
 		} finally {
 			callback.dispose();
 		}
