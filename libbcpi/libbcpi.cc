@@ -110,9 +110,10 @@ bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size)
 	if (b->overflow) {
 		return;
 	}
+
 	int new_size = b->size + item_size;
 	if (new_size > b->max_size) {
-		int new_max_size = b->max_size * 2;
+		int new_max_size = std::max(b->max_size * 2, new_size);
 		char *new_data = (char *)realloc(b->data, new_max_size);
 		if (!new_data) {
 			b->overflow = true;
@@ -120,7 +121,6 @@ bcpi_serializer_check_add(struct bcpi_serializer *b, int item_size)
 			b->data = new_data;
 			b->max_size = new_max_size;
 		}
-		return;
 	}
 }
 
@@ -263,12 +263,12 @@ bcpi_serializer_get_int24(struct bcpi_serializer *b)
 void
 bcpi_serializer_add_string(struct bcpi_serializer *b, const char *str)
 {
-	int len = strlen(str) + 1;
-	bcpi_serializer_check_add(b, len + sizeof(len));
+	size_t len = strlen(str) + 1;
+	bcpi_serializer_check_add(b, len + 1);
 	if (b->overflow) {
 		return;
 	}
-	assert(len <= 256);
+	assert(len < 256);
 	bcpi_serializer_add_uint8(b, len);
 	bcpi_serializer_add_bytes(b, str, len);
 }

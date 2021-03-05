@@ -582,8 +582,8 @@ bcpid_save(struct bcpid *b)
 		PERROR("uname");
 		record->system_name = strdup("");
 	} else {
-		char system_name[512];
-		snprintf(system_name, 511, "%s %s %s %s %s", uts.sysname,
+		char system_name[255];
+		snprintf(system_name, 255, "%s %s %s %s %s", uts.sysname,
 		    uts.release, uts.version, uts.nodename, uts.machine);
 		record->system_name = strdup(system_name);
 	}
