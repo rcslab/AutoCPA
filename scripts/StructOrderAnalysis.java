@@ -26,15 +26,21 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
+import generic.concurrent.QCallback;
+
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -191,9 +197,9 @@ class FieldReferences {
 	}
 
 	private void collect(TaskMonitor monitor) throws Exception {
-		QCallback callback = new QCallback();
+		Callback callback = new Callback();
 		try {
-			ParallelDecompiler.decompileFunctions(callback, this.program, this.functions, monitor);
+			decompileFunctions(callback, this.program, this.functions, monitor);
 		} finally {
 			callback.dispose();
 		}
@@ -208,6 +214,35 @@ class FieldReferences {
 	}
 
 	/**
+	 * Facade over ParallelDecompiler::decompileFunctions() that handles the API change between
+	 * Ghidra 9.1 and 9.2.
+	 */
+	<R> void decompileFunctions(QCallback<Function, R> callback, Program program, Collection<Function> functions, TaskMonitor monitor) throws Exception {
+		MethodHandles.Lookup lookup = MethodHandles.lookup();
+		MethodHandle method92 = null;
+		MethodHandle method91 = null;
+		try {
+			MethodType type92 = MethodType.methodType(List.class, QCallback.class, Collection.class, TaskMonitor.class);
+			method92 = lookup.findStatic(ParallelDecompiler.class, "decompileFunctions", type92);
+		} catch (ReflectiveOperationException e) {
+			MethodType type91 = MethodType.methodType(List.class, QCallback.class, Program.class, Collection.class, TaskMonitor.class);
+			method91 = lookup.findStatic(ParallelDecompiler.class, "decompileFunctions", type91);
+		}
+
+		try {
+			if (method92 != null) {
+				method92.invoke(callback, functions, monitor);
+			} else {
+				method91.invoke(callback, program, functions, monitor);
+			}
+		} catch (Exception e) {
+			throw e;
+		} catch (Throwable e) {
+			throw new Exception(e);
+		}
+	}
+
+	/**
 	 * Get the fields accessed at a particular address.
 	 */
 	Set<DataTypeComponent> getFields(Address address) {
@@ -217,8 +252,8 @@ class FieldReferences {
 	/**
 	 * Based on Ghidra's DecompilerDataTypeReferenceFinder.
 	 */
-	private class QCallback extends DecompilerCallback<Void> {
-		QCallback() {
+	private class Callback extends DecompilerCallback<Void> {
+		Callback() {
 			super(program, new DecompilerConfigurer());
 		}
 
@@ -398,7 +433,7 @@ class AccessPattern {
  */
 class AccessPatterns {
 	// Stores the access patterns for each struct
-	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap();
+	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
 	private final BasicBlockModel bbModel;
 	private final BcpiData data;
 	private final FieldReferences refs;
