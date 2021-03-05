@@ -1,0 +1,3 @@
+The files in this directory should be added to 
+/usr/src/lib/libpmc/pmu-events/arch/x86.  You will need to rebuild and 
+reinstall libpmc onto your machine.

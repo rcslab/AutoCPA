@@ -243,7 +243,8 @@ struct bcpid_hash_cache {
 	bcpi_hash hash;
 };
 
-bool foreground = false;
+static bool foreground = false;
+static int verbose = 0;
 
 struct bcpid {
 	int num_pmclog_event;
@@ -1637,9 +1638,6 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 	int opt;
 	struct stat s;
 
-	// XXX: Hack since we get lots of errors in libpmcstat
-	err_set_file(fopen("/dev/null", "w"));
-
 	b->default_count = BCPID_DEFAULT_COUNT;
 	b->default_pmc = "";
 	b->default_output_dir = BCPID_OUTPUT_DIRECTORY;
@@ -1648,7 +1646,7 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 	b->node_collect_threshold = BCPID_NODE_GC_THRESHOLD;
 	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
 
-	while ((opt = getopt(argc, (char **)argv, "hc:p:l:Lo:f")) != -1) {
+	while ((opt = getopt(argc, (char **)argv, "hc:p:l:Lo:fv")) != -1) {
 		switch (opt) {
 		case 'c':
 			b->default_count = atoi(optarg);
@@ -1678,10 +1676,22 @@ bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
 			foreground = true;
 			break;
 		}
+		case 'v': {
+			verbose++;
+			break;
+		}
 		default:
 			usage();
 			exit(EX_USAGE);
 		}
+	}
+
+	if (!verbose) {
+		/*
+		 * XXX: Hack since we get lots of errors in libpmcstat, but
+		 * this also hides some important errors!
+		 */
+		err_set_file(fopen("/dev/null", "w"));
 	}
 
 	if (stat(BCPID_OUTPUT_DIRECTORY, &s) == -1) {

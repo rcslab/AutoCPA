@@ -1,0 +1,8 @@
+[
+  {
+    "EventName": "ls_refills_from_sys.all",
+    "EventCode": "0x43",
+    "BriefDescription": "Demand Data Cache Fills by Data Source. All L1 DC misses.",
+    "UMask": "0x5B"
+  }
+]
