@@ -28,6 +28,7 @@ import ghidra.util.task.TaskMonitor;
 
 import generic.concurrent.QCallback;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 
@@ -73,26 +74,77 @@ public class StructOrderAnalysis extends GhidraScript {
 		AccessPatterns patterns = AccessPatterns.collect(this.currentProgram, data, refs, this.monitor);
 
 		if (args.length > 1) {
-			String regex = args[1];
-			for (Structure struct : patterns.getStructures()) {
-				if (!struct.getName().matches(regex)) {
-					continue;
-				}
-
-				System.out.print("Found these access patterns:\n\n");
-				for (AccessPattern pattern : patterns.getPatterns(struct)) {
-					int count = patterns.getCount(struct, pattern);
-					System.out.format("%s (%d times)\n", pattern, count);
-				}
-
-				System.out.print("\nSuggested layout:\n\n");
-				prettyPrint(patterns.optimize(struct));
-			}
+			printDetails(patterns, args[1]);
 		} else {
-			System.out.print("Found data for these structs:\n\n");
-			for (Structure struct : patterns.getStructures()) {
-				System.out.println(struct.getName());
+			printSummary(patterns);
+		}
+	}
+
+	private static class SummaryRow {
+		final Structure struct;
+		final int nSamples;
+		final int nPatterns;
+
+		SummaryRow(Structure struct, int nSamples, int nPatterns) {
+			this.struct = struct;
+			this.nSamples = nSamples;
+			this.nPatterns = nPatterns;
+		}
+	}
+
+	private void printSummary(AccessPatterns patterns) {
+		List<SummaryRow> rows = new ArrayList<>();
+		for (Structure struct : patterns.getStructures()) {
+			int nSamples = 0;
+			int nPatterns = 0;
+			for (AccessPattern pattern : patterns.getPatterns(struct)) {
+				nSamples += patterns.getCount(struct, pattern);
+				nPatterns += 1;
 			}
+			rows.add(new SummaryRow(struct, nSamples, nPatterns));
+		}
+
+		Collections.sort(rows, Comparator
+			.<SummaryRow>comparingInt(r -> r.nSamples)
+			.reversed());
+
+		System.out.print("Found data for these structs:\n\n");
+
+		int longestName = rows.stream()
+			.mapToInt(row -> row.struct.getName().length())
+			.max()
+			.orElse(0);
+		int longestSamples = rows.stream()
+			.mapToInt(row -> Integer.toString(row.nSamples).length())
+			.max()
+			.orElse(0);
+		int longestPatterns = rows.stream()
+			.mapToInt(row -> Integer.toString(row.nPatterns).length())
+			.max()
+			.orElse(0);
+
+		for (SummaryRow row : rows) {
+			String name = Strings.padEnd(row.struct.getName(), longestName, ' ');
+			String nSamples = Strings.padStart(Integer.toString(row.nSamples), longestSamples, ' ');
+			String nPatterns = Strings.padStart(Integer.toString(row.nPatterns), longestPatterns, ' ');
+			System.out.format("%s  %s samples, %s patterns\n", name, nSamples, nPatterns);
+		}
+	}
+
+	private void printDetails(AccessPatterns patterns, String filterRegex) {
+		for (Structure struct : patterns.getStructures()) {
+			if (!struct.getName().matches(filterRegex)) {
+				continue;
+			}
+
+			System.out.print("Found these access patterns:\n\n");
+			for (AccessPattern pattern : patterns.getPatterns(struct)) {
+				int count = patterns.getCount(struct, pattern);
+				System.out.format("%s (%d times)\n", pattern, count);
+			}
+
+			System.out.print("\nSuggested layout:\n\n");
+			prettyPrint(patterns.optimize(struct));
 		}
 	}
 
@@ -466,6 +518,10 @@ class AccessPatterns {
 							.add(field);
 					}
 				}
+			}
+
+			if (pattern.isEmpty()) {
+				Msg.warn(this, "No structure accesses found for " + count + " samples at address " + baseAddress);
 			}
 
 			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
