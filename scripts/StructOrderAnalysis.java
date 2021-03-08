@@ -554,6 +554,10 @@ class AccessPatterns {
 	private Set<CodeBlock> getCodeBlocksFrom(Address address, TaskMonitor monitor) throws Exception {
 		// Get all the basic blocks in the function contining the given address
 		Function function = this.listing.getFunctionContaining(address);
+		if (function == null) {
+			return Collections.emptySet();
+		}
+
 		AddressSetView body = function.getBody();
 		CodeBlockIterator blocks = this.bbModel.getCodeBlocksContaining(body, monitor);
 
