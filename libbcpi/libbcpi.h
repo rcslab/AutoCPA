@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#define BCPID_DEFAULT_PATH "/var/tmp"
+
 #define BCPI_SHA256_SIZE 32
 #define BCPI_MAX_NUM_COUNTER 16
 

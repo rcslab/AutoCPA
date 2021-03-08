@@ -1004,7 +1004,7 @@ bcpi_collect_object(struct bcpi_record *record,
 	for (int i = 0; i < record->num_object; ++i) {
 		struct bcpi_object *ro = &record->object_list[i];
 		if (strcasestr(ro->path, name)) {
-			fprintf(stderr, "adding %s\n", ro->path);
+			// fprintf(stderr, "adding %s\n", ro->path);
 			object_out.emplace_back(ro);
 		}
 	}
