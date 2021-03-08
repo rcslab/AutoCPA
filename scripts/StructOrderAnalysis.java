@@ -12,9 +12,17 @@ import ghidra.app.decompiler.parallel.ParallelDecompiler;
 import ghidra.app.extension.datatype.finder.DecompilerVariable;
 import ghidra.app.extension.datatype.finder.DecompilerReference;
 import ghidra.app.script.GhidraScript;
+import ghidra.graph.GraphAlgorithms;
+import ghidra.graph.jung.JungDirectedGraph;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.block.BasicBlockModel;
 import ghidra.program.model.block.CodeBlock;
+import ghidra.program.model.block.CodeBlockIterator;
+import ghidra.program.model.block.CodeBlockReference;
+import ghidra.program.model.block.CodeBlockReferenceIterator;
+import ghidra.program.model.block.graph.CodeBlockEdge;
+import ghidra.program.model.block.graph.CodeBlockVertex;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DefaultDataType;
@@ -40,6 +48,7 @@ import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -486,11 +495,13 @@ class AccessPattern {
 class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
+	private final Listing listing;
 	private final BasicBlockModel bbModel;
 	private final BcpiData data;
 	private final FieldReferences refs;
 
 	private AccessPatterns(Program program, BcpiData data, FieldReferences refs) {
+		this.listing = program.getListing();
 		this.bbModel = new BasicBlockModel(program);
 		this.data = data;
 		this.refs = refs;
@@ -507,11 +518,17 @@ class AccessPatterns {
 
 	private void collect(TaskMonitor monitor) throws Exception {
 		for (Address baseAddress : this.data.getAddresses()) {
-			int count = this.data.getCount(baseAddress);
 			Map<Structure, Set<DataTypeComponent>> pattern = new HashMap<>();
+			int count = this.data.getCount(baseAddress);
 
-			for (CodeBlock block : this.bbModel.getCodeBlocksContaining(baseAddress, monitor)) {
+			Set<CodeBlock> blocks = getCodeBlocksFrom(baseAddress, monitor);
+			for (CodeBlock block : blocks) {
 				for (Address address : block.getAddresses(true)) {
+					// Don't count accesses before the miss
+					if (block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
+						continue;
+					}
+
 					for (DataTypeComponent field : this.refs.getFields(address)) {
 						Structure struct = (Structure) field.getParent();
 						pattern.computeIfAbsent(struct, k -> new HashSet<>())
@@ -526,9 +543,60 @@ class AccessPatterns {
 
 			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
 				this.patterns.computeIfAbsent(entry.getKey(), k -> HashMultiset.create())
-					.add(new AccessPattern(entry.getValue()));
+					.add(new AccessPattern(entry.getValue()), count);
 			}
 		}
+	}
+
+	/**
+	 * @return All the code blocks that flow from the given address.
+	 */
+	private Set<CodeBlock> getCodeBlocksFrom(Address address, TaskMonitor monitor) throws Exception {
+		// Get all the basic blocks in the function contining the given address
+		Function function = this.listing.getFunctionContaining(address);
+		AddressSetView body = function.getBody();
+		CodeBlockIterator blocks = this.bbModel.getCodeBlocksContaining(body, monitor);
+
+		// Build the control flow graph for that function
+		JungDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph = new JungDirectedGraph<>();
+		while (blocks.hasNext()) {
+			CodeBlock block = blocks.next();
+			CodeBlockVertex vertex = new CodeBlockVertex(block);
+			graph.addVertex(vertex);
+
+			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
+			while (dests.hasNext()) {
+				CodeBlockReference dest = dests.next();
+				CodeBlock destBlock = dest.getDestinationBlock();
+				if (!body.contains(destBlock)) {
+					// Ignore non-local control flow
+					continue;
+				}
+
+				CodeBlockVertex destVertex = new CodeBlockVertex(destBlock);
+				graph.addVertex(destVertex);
+				graph.addEdge(new CodeBlockEdge(vertex, destVertex));
+			}
+		}
+
+		// Add a dummy source node in case the whole function is a loop
+		CodeBlockVertex dummy = new CodeBlockVertex("SOURCE");
+		graph.addVertex(dummy);
+		for (CodeBlock entry : this.bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
+			graph.addEdge(new CodeBlockEdge(dummy, new CodeBlockVertex(entry)));
+		}
+
+		// Compute the dominators of the given address
+		CodeBlock[] sources = this.bbModel.getCodeBlocksContaining(address, monitor);
+		Set<CodeBlock> dominators = new HashSet<>();
+		for (CodeBlock source : sources) {
+			CodeBlockVertex sourceVertex = new CodeBlockVertex(source);
+			Set<CodeBlockVertex> vertices = GraphAlgorithms.findDominance(graph, sourceVertex, monitor);
+			for (CodeBlockVertex vertex : vertices) {
+				dominators.add(vertex.getCodeBlock());
+			}
+		}
+		return dominators;
 	}
 
 	/**
