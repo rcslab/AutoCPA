@@ -595,9 +595,12 @@ class AccessPatterns {
 		Set<CodeBlock> dominators = new HashSet<>();
 		for (CodeBlock source : sources) {
 			CodeBlockVertex sourceVertex = new CodeBlockVertex(source);
-			Set<CodeBlockVertex> vertices = GraphAlgorithms.findDominance(graph, sourceVertex, monitor);
-			for (CodeBlockVertex vertex : vertices) {
-				dominators.add(vertex.getCodeBlock());
+			Set<?> vertices = GraphAlgorithms.findDominance(graph, sourceVertex, monitor);
+			for (Object vertex : vertices) {
+				// Work around the issue fixed by https://github.com/NationalSecurityAgency/ghidra/commit/307425c1961e94799e2c1167eabcd749dafcb61d
+				if (vertex instanceof CodeBlockVertex) {
+					dominators.add(((CodeBlockVertex) vertex).getCodeBlock());
+				}
 			}
 		}
 		return dominators;
