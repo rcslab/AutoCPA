@@ -146,26 +146,87 @@ public class StructOrderAnalysis extends GhidraScript {
 				continue;
 			}
 
-			System.out.print("Found these access patterns:\n\n");
-			for (AccessPattern pattern : patterns.getPatterns(struct)) {
-				int count = patterns.getCount(struct, pattern);
-				System.out.format("%s (%d times)\n", pattern, count);
-			}
-
-			System.out.print("\nSuggested layout:\n\n");
-			prettyPrint(patterns.optimize(struct));
+			printOriginal(patterns, struct);
+			printOptimized(patterns.optimize(struct));
 		}
 	}
 
-	private void prettyPrint(Structure struct) {
-		System.out.format("struct %s {\n", struct.getName());
+	private void printOriginal(AccessPatterns patterns, Structure struct) {
+		Map<DataTypeComponent, StringBuilder> fields = new HashMap<>();
 		for (DataTypeComponent field : struct.getComponents()) {
-			// Skip padding
+			// Skip struct padding
 			if (!field.getDataType().equals(DefaultDataType.dataType)) {
-				System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+				fields.put(field, new StringBuilder()
+					.append("\t")
+					.append(field.getDataType().getName())
+					.append(" ")
+					.append(field.getFieldName())
+					.append(";"));
 			}
 		}
-		System.out.format("};\n");
+
+		int maxLen = fields.values().stream()
+			.mapToInt(str -> str.length())
+			.max()
+			.orElse(0);
+		for (StringBuilder str : fields.values()) {
+			while (str.length() < maxLen) {
+				str.append(" ");
+			}
+		}
+
+		List<AccessPattern> structPatterns = new ArrayList<>(patterns.getPatterns(struct));
+		Collections.sort(structPatterns, Comparator
+			.<AccessPattern>comparingInt(p -> patterns.getCount(struct, p))
+			.reversed());
+		for (AccessPattern pattern : structPatterns) {
+			for (Map.Entry<DataTypeComponent, StringBuilder> entry : fields.entrySet()) {
+				DataTypeComponent field = entry.getKey();
+				StringBuilder str = entry.getValue();
+				if (pattern.getFields().contains(field)) {
+					str.append(" *");
+				} else {
+					str.append("  ");
+				}
+			}
+		}
+
+		System.out.print("\nOriginal layout:\n\n");
+		System.out.format("struct %s {\n", struct.getName());
+		int padding = 0;
+		for (DataTypeComponent field : struct.getComponents()) {
+			StringBuilder str = fields.get(field);
+			if (str == null) {
+				padding += field.getLength();
+			} else {
+				if (padding != 0) {
+					System.out.format("\t// char padding[%d];\n", padding);
+					padding = 0;
+				}
+				System.out.println(str);
+			}
+		}
+		if (padding != 0) {
+			System.out.format("\t// char padding[%d];\n", padding);
+			padding = 0;
+		}
+		System.out.print("};\n\n");
+
+		System.out.print("Access patterns:\n\n");
+		for (AccessPattern pattern : structPatterns) {
+			int count = patterns.getCount(struct, pattern);
+			System.out.format("%s (%d times)\n", pattern, count);
+		}
+	}
+
+	private void printOptimized(Structure struct) {
+		System.out.print("\nSuggested layout:\n\n");
+
+		System.out.format("struct %s {\n", struct.getName());
+		for (DataTypeComponent field : struct.getComponents()) {
+			System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+		}
+		System.out.print("};\n\n--\n");
 	}
 }
 
