@@ -151,7 +151,7 @@ change_offset(uint64_t num, Elf *e)
 int
 search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 {
-	int fd_elf = -1;
+	int fd = -1;
 	Elf *e;
 
 	if (elf_version(EV_CURRENT) == EV_NONE)
@@ -160,19 +160,19 @@ search_addr(const char *progname, Dwarf_Addr address, uint64_t *revised_addr)
 		    "failed : %s ",
 		    elf_errmsg(-1));
 
-	if ((fd_elf = open(progname, O_RDONLY)) < 0) {
+	if ((fd = open(progname, O_RDONLY)) < 0) {
 		perror("open");
-		std::cerr << "error in fd_elf\n";
+		std::cerr << "error in fd_elf " << progname << std::endl;
 		return 1;
 	}
 
-	if ((e = elf_begin(fd_elf, ELF_C_READ, NULL)) == NULL)
+	if ((e = elf_begin(fd, ELF_C_READ, NULL)) == NULL)
 		errx(EXIT_FAILURE, "elf_begin() failed : %s.", elf_errmsg(-1));
 
 	*revised_addr = change_offset(address, e);
 
 	elf_end(e);
-	close(fd_elf);
+	close(fd);
 
 	return 0;
 }
