@@ -37,8 +37,10 @@ import ghidra.util.task.TaskMonitor;
 import generic.concurrent.QCallback;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
+import com.google.common.collect.SetMultimap;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -209,11 +211,15 @@ public class StructOrderAnalysis extends GhidraScript {
 		for (AccessPattern pattern : structPatterns) {
 			int count = patterns.getCount(struct, pattern);
 			System.out.format("%s (%d times)\n", pattern, count);
+			for (Function func : patterns.getFunctions(pattern)) {
+				System.out.format("\t- %s()\n", func.getName());
+			}
+			System.out.println();
 		}
 	}
 
 	private void printOptimized(Structure struct) {
-		System.out.print("\nSuggested layout:\n\n");
+		System.out.print("Suggested layout:\n\n");
 
 		System.out.format("struct %s {\n", struct.getName());
 		for (DataTypeComponent field : struct.getComponents()) {
@@ -631,6 +637,7 @@ class AccessPattern {
 class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
+	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
 	private final Listing listing;
 	private final BasicBlockModel bbModel;
 	private final BcpiData data;
@@ -678,8 +685,10 @@ class AccessPatterns {
 			}
 
 			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
+				AccessPattern accessPattern = new AccessPattern(entry.getValue());
 				this.patterns.computeIfAbsent(entry.getKey(), k -> HashMultiset.create())
-					.add(new AccessPattern(entry.getValue()), count);
+					.add(accessPattern, count);
+				this.functions.put(accessPattern, this.listing.getFunctionContaining(baseAddress));
 			}
 		}
 	}
@@ -777,6 +786,13 @@ class AccessPatterns {
 			}
 		}
 		return count;
+	}
+
+	/**
+	 * @return The functions which had the given access pattern.
+	 */
+	Set<Function> getFunctions(AccessPattern pattern) {
+		return this.functions.get(pattern);
 	}
 
 	/**
