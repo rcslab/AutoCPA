@@ -37,8 +37,10 @@ import ghidra.util.task.TaskMonitor;
 import generic.concurrent.QCallback;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
+import com.google.common.collect.SetMultimap;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -152,27 +154,40 @@ public class StructOrderAnalysis extends GhidraScript {
 	}
 
 	private void printOriginal(AccessPatterns patterns, Structure struct) {
-		Map<DataTypeComponent, StringBuilder> fields = new HashMap<>();
+		Table table = new Table();
+		table.addColumn();
+
+		Map<DataTypeComponent, Integer> rows = new HashMap<>();
+		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
-			// Skip struct padding
-			if (!field.getDataType().equals(DefaultDataType.dataType)) {
-				fields.put(field, new StringBuilder()
+			if (field.getDataType().equals(DefaultDataType.dataType)) {
+				padding += field.getLength();
+			} else {
+				if (padding != 0) {
+					int row = table.addRow();
+					table.get(row, 0)
+						.append("\t// char padding[")
+						.append(padding)
+						.append("];");
+					padding = 0;
+				}
+
+				int row = table.addRow();
+				rows.put(field, row);
+				table.get(row, 0)
 					.append("\t")
 					.append(field.getDataType().getName())
 					.append(" ")
 					.append(field.getFieldName())
-					.append(";"));
+					.append(";");
 			}
 		}
-
-		int maxLen = fields.values().stream()
-			.mapToInt(str -> str.length())
-			.max()
-			.orElse(0);
-		for (StringBuilder str : fields.values()) {
-			while (str.length() < maxLen) {
-				str.append(" ");
-			}
+		if (padding != 0) {
+			int row = table.addRow();
+			table.get(row, 0)
+				.append("\t// char padding[")
+				.append(padding)
+				.append("];");
 		}
 
 		List<AccessPattern> structPatterns = new ArrayList<>(patterns.getPatterns(struct));
@@ -180,53 +195,121 @@ public class StructOrderAnalysis extends GhidraScript {
 			.<AccessPattern>comparingInt(p -> patterns.getCount(struct, p))
 			.reversed());
 		for (AccessPattern pattern : structPatterns) {
-			for (Map.Entry<DataTypeComponent, StringBuilder> entry : fields.entrySet()) {
-				DataTypeComponent field = entry.getKey();
-				StringBuilder str = entry.getValue();
-				if (pattern.getFields().contains(field)) {
-					str.append(" *");
-				} else {
-					str.append("  ");
-				}
+			int col = table.addColumn();
+			for (DataTypeComponent field : pattern.getFields()) {
+				table.get(rows.get(field), col)
+					.append(patterns.getCount(struct, pattern));
 			}
 		}
 
 		System.out.print("\nOriginal layout:\n\n");
 		System.out.format("struct %s {\n", struct.getName());
-		int padding = 0;
-		for (DataTypeComponent field : struct.getComponents()) {
-			StringBuilder str = fields.get(field);
-			if (str == null) {
-				padding += field.getLength();
-			} else {
-				if (padding != 0) {
-					System.out.format("\t// char padding[%d];\n", padding);
-					padding = 0;
-				}
-				System.out.println(str);
-			}
-		}
-		if (padding != 0) {
-			System.out.format("\t// char padding[%d];\n", padding);
-			padding = 0;
-		}
+		System.out.print(table);
 		System.out.print("};\n\n");
 
 		System.out.print("Access patterns:\n\n");
 		for (AccessPattern pattern : structPatterns) {
 			int count = patterns.getCount(struct, pattern);
 			System.out.format("%s (%d times)\n", pattern, count);
+			for (Function func : patterns.getFunctions(pattern)) {
+				System.out.format("\t- %s()\n", func.getName());
+			}
+			System.out.println();
 		}
 	}
 
 	private void printOptimized(Structure struct) {
-		System.out.print("\nSuggested layout:\n\n");
+		System.out.print("Suggested layout:\n\n");
 
 		System.out.format("struct %s {\n", struct.getName());
 		for (DataTypeComponent field : struct.getComponents()) {
-			System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+			if (!field.getDataType().equals(DefaultDataType.dataType)) {
+				System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+			}
 		}
 		System.out.print("};\n\n--\n");
+	}
+}
+
+/**
+ * A properly aligned table.
+ */
+class Table {
+	private final List<List<StringBuilder>> rows = new ArrayList<>();
+	private int nCols = 0;
+
+	/**
+	 * @return The number of rows.
+	 */
+	int nRows() {
+		return this.rows.size();
+	}
+
+	/**
+	 * @return The number of columns.
+	 */
+	int nColumns() {
+		return nCols;
+	}
+
+	/**
+	 * @return The index of the new row.
+	 */
+	int addRow() {
+		List<StringBuilder> row = new ArrayList<>();
+		for (int i = 0; i < this.nCols; ++i) {
+			row.add(new StringBuilder());
+		}
+		this.rows.add(row);
+		return this.rows.size() - 1;
+	}
+
+	/**
+	 * Add a new column.
+	 */
+	int addColumn() {
+		for (List<StringBuilder> row : this.rows) {
+			row.add(new StringBuilder());
+		}
+		return this.nCols++;
+	}
+
+	/**
+	 * @return The StringBuilder in the given cell.
+	 */
+	StringBuilder get(int row, int col) {
+		return this.rows.get(row).get(col);
+	}
+
+	@Override
+	public String toString() {
+		List<Integer> widths = new ArrayList<>();
+		for (int i = 0; i < this.nCols; ++i) {
+			int width = 0;
+			for (List<StringBuilder> row : this.rows) {
+				int curWidth = row.get(i).length();
+				if (width < curWidth) {
+					width = curWidth;
+				}
+			}
+			widths.add(width + 1);
+		}
+
+		StringBuilder result = new StringBuilder();
+		for (List<StringBuilder> row : this.rows) {
+			for (int i = 0; i < this.nCols; ++i) {
+				StringBuilder cell = row.get(i);
+				result.append(cell);
+
+				int width = widths.get(i);
+				for (int j = cell.length(); j < width; ++j) {
+					result.append(' ');
+				}
+			}
+			result.append('\n');
+		}
+
+		return result.toString();
 	}
 }
 
@@ -556,6 +639,7 @@ class AccessPattern {
 class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
+	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
 	private final Listing listing;
 	private final BasicBlockModel bbModel;
 	private final BcpiData data;
@@ -603,8 +687,10 @@ class AccessPatterns {
 			}
 
 			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
+				AccessPattern accessPattern = new AccessPattern(entry.getValue());
 				this.patterns.computeIfAbsent(entry.getKey(), k -> HashMultiset.create())
-					.add(new AccessPattern(entry.getValue()), count);
+					.add(accessPattern, count);
+				this.functions.put(accessPattern, this.listing.getFunctionContaining(baseAddress));
 			}
 		}
 	}
@@ -702,6 +788,13 @@ class AccessPatterns {
 			}
 		}
 		return count;
+	}
+
+	/**
+	 * @return The functions which had the given access pattern.
+	 */
+	Set<Function> getFunctions(AccessPattern pattern) {
+		return this.functions.get(pattern);
 	}
 
 	/**
