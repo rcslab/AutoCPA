@@ -12,6 +12,9 @@ import ghidra.app.decompiler.parallel.ParallelDecompiler;
 import ghidra.app.extension.datatype.finder.DecompilerVariable;
 import ghidra.app.extension.datatype.finder.DecompilerReference;
 import ghidra.app.script.GhidraScript;
+import ghidra.graph.DefaultGEdge;
+import ghidra.graph.GDirectedGraph;
+import ghidra.graph.GEdge;
 import ghidra.graph.GraphAlgorithms;
 import ghidra.graph.jung.JungDirectedGraph;
 import ghidra.program.model.address.Address;
@@ -21,8 +24,6 @@ import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.block.CodeBlockIterator;
 import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
-import ghidra.program.model.block.graph.CodeBlockEdge;
-import ghidra.program.model.block.graph.CodeBlockVertex;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DefaultDataType;
@@ -634,12 +635,163 @@ class AccessPattern {
 }
 
 /**
+ * A code block in a control flow graph.
+ *
+ * Not using ghidra.program.model.block.graph.CodeBlockVertex because it treats
+ * all dummy vertices as equal, but we need two different dummy vertices.
+ */
+class CodeBlockVertex {
+	private final CodeBlock block;
+	private final String name;
+	final Object key;
+
+	CodeBlockVertex(CodeBlock block) {
+		this.block = block;
+		this.name = block.getName();
+
+		// Same assumption as Ghidra's CodeBlockVertex: every basic block
+		// has a unique min address
+		this.key = block.getMinAddress();
+	}
+
+	CodeBlockVertex(String name) {
+		this.block = null;
+		this.name = name;
+		this.key = name;
+	}
+
+	CodeBlock getCodeBlock() {
+		return this.block;
+	}
+
+	@Override
+	public String toString() {
+		return this.name;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (obj == this) {
+			return true;
+		} else if (!(obj instanceof CodeBlockVertex)) {
+			return false;
+		}
+
+		CodeBlockVertex other = (CodeBlockVertex) obj;
+		return this.key.equals(other.key);
+	}
+
+	@Override
+	public int hashCode() {
+		return this.key.hashCode();
+	}
+}
+
+/**
+ * An edge in a control flow graph.
+ */
+class CodeBlockEdge extends DefaultGEdge<CodeBlockVertex> {
+	CodeBlockEdge(CodeBlockVertex from, CodeBlockVertex to) {
+		super(from, to);
+	}
+}
+
+/**
+ * A control flow graph of a single function.
+ */
+class ControlFlowGraph {
+	private final BasicBlockModel bbModel;
+	private final TaskMonitor monitor;
+	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> domTree;
+
+	ControlFlowGraph(Function function, BasicBlockModel bbModel, TaskMonitor monitor) throws Exception {
+		this.bbModel = bbModel;
+		this.monitor = monitor;
+
+		AddressSetView body = function.getBody();
+		CodeBlockIterator blocks = bbModel.getCodeBlocksContaining(body, monitor);
+
+		// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
+		Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
+
+		// Build the control flow graph for that function.  We want all the nodes B such
+		// that all paths from A to END contain B, i.e.
+		//
+		//     {B | B postDom A}
+		//
+		// findPostDomainance(A) gets us {B | A postDom B} instead, so we have to compute it
+		// by hand.  The post-dominance relation is just the dominance relation on the
+		// transposed graph, so we orient all the edges backwards, compute the dominance
+		// tree, and walk the parents instead of the children.
+		JungDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph = new JungDirectedGraph<>();
+		while (blocks.hasNext()) {
+			CodeBlock block = blocks.next();
+			CodeBlockVertex vertex = interner.computeIfAbsent(new CodeBlockVertex(block), v -> v);
+			graph.addVertex(vertex);
+
+			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
+			while (dests.hasNext()) {
+				CodeBlockReference dest = dests.next();
+				CodeBlock destBlock = dest.getDestinationBlock();
+				if (!body.contains(destBlock)) {
+					// Ignore non-local control flow
+					continue;
+				}
+
+				CodeBlockVertex destVertex = interner.computeIfAbsent(new CodeBlockVertex(destBlock), v -> v);
+				graph.addVertex(destVertex);
+				graph.addEdge(new CodeBlockEdge(destVertex, vertex));
+			}
+		}
+
+		// Make sure the graph has a unique source and sink
+		CodeBlockVertex source = new CodeBlockVertex("SOURCE");
+		for (CodeBlockVertex vertex : GraphAlgorithms.getSources(graph)) {
+			graph.addVertex(source);
+			graph.addEdge(new CodeBlockEdge(source, vertex));
+		}
+
+		// The function entry point is a sink, since the graph is reversed
+		CodeBlockVertex sink = new CodeBlockVertex("SINK");
+		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
+			CodeBlockVertex vertex = interner.computeIfAbsent(new CodeBlockVertex(block), v -> v);
+			graph.addVertex(sink);
+			graph.addEdge(new CodeBlockEdge(vertex, sink));
+		}
+
+		this.domTree = GraphAlgorithms.findDominanceTree(graph, monitor);
+	}
+
+	/**
+	 * Get the basic blocks that are guaranteed to be reached from the given address.
+	 */
+	Set<CodeBlock> definitelyReachedBlocks(Address address) throws Exception {
+		if (this.domTree == null) return Collections.emptySet();
+
+		List<CodeBlockVertex> sources = new ArrayList<>();
+		for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, this.monitor)) {
+			sources.add(new CodeBlockVertex(block));
+		}
+
+		Set<CodeBlock> blocks = new HashSet<>();
+		for (CodeBlockVertex vertex : GraphAlgorithms.getAncestors(this.domTree, sources)) {
+			CodeBlock block = vertex.getCodeBlock();
+			if (block != null) {
+				blocks.add(block);
+			}
+		}
+		return blocks;
+	}
+}
+
+/**
  * Struct field access patterns.
  */
 class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
 	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
+	private final Map<Function, ControlFlowGraph> cfgs = new HashMap<>();
 	private final Listing listing;
 	private final BasicBlockModel bbModel;
 	private final BcpiData data;
@@ -705,52 +857,13 @@ class AccessPatterns {
 			return Collections.emptySet();
 		}
 
-		AddressSetView body = function.getBody();
-		CodeBlockIterator blocks = this.bbModel.getCodeBlocksContaining(body, monitor);
-
-		// Build the control flow graph for that function
-		JungDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph = new JungDirectedGraph<>();
-		while (blocks.hasNext()) {
-			CodeBlock block = blocks.next();
-			CodeBlockVertex vertex = new CodeBlockVertex(block);
-			graph.addVertex(vertex);
-
-			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
-			while (dests.hasNext()) {
-				CodeBlockReference dest = dests.next();
-				CodeBlock destBlock = dest.getDestinationBlock();
-				if (!body.contains(destBlock)) {
-					// Ignore non-local control flow
-					continue;
-				}
-
-				CodeBlockVertex destVertex = new CodeBlockVertex(destBlock);
-				graph.addVertex(destVertex);
-				graph.addEdge(new CodeBlockEdge(vertex, destVertex));
-			}
+		ControlFlowGraph cfg = this.cfgs.get(function);
+		if (cfg == null) {
+			cfg = new ControlFlowGraph(function, this.bbModel, monitor);
+			this.cfgs.put(function, cfg);
 		}
 
-		// Add a dummy source node in case the whole function is a loop
-		CodeBlockVertex dummy = new CodeBlockVertex("SOURCE");
-		graph.addVertex(dummy);
-		for (CodeBlock entry : this.bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
-			graph.addEdge(new CodeBlockEdge(dummy, new CodeBlockVertex(entry)));
-		}
-
-		// Compute the dominators of the given address
-		CodeBlock[] sources = this.bbModel.getCodeBlocksContaining(address, monitor);
-		Set<CodeBlock> dominators = new HashSet<>();
-		for (CodeBlock source : sources) {
-			CodeBlockVertex sourceVertex = new CodeBlockVertex(source);
-			Set<?> vertices = GraphAlgorithms.findDominance(graph, sourceVertex, monitor);
-			for (Object vertex : vertices) {
-				// Work around the issue fixed by https://github.com/NationalSecurityAgency/ghidra/commit/307425c1961e94799e2c1167eabcd749dafcb61d
-				if (vertex instanceof CodeBlockVertex) {
-					dominators.add(((CodeBlockVertex) vertex).getCodeBlock());
-				}
-			}
-		}
-		return dominators;
+		return cfg.definitelyReachedBlocks(address);
 	}
 
 	/**
