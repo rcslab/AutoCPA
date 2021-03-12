@@ -223,7 +223,9 @@ public class StructOrderAnalysis extends GhidraScript {
 
 		System.out.format("struct %s {\n", struct.getName());
 		for (DataTypeComponent field : struct.getComponents()) {
-			System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+			if (!field.getDataType().equals(DefaultDataType.dataType)) {
+				System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+			}
 		}
 		System.out.print("};\n\n--\n");
 	}
