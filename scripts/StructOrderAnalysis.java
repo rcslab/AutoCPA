@@ -152,27 +152,40 @@ public class StructOrderAnalysis extends GhidraScript {
 	}
 
 	private void printOriginal(AccessPatterns patterns, Structure struct) {
-		Map<DataTypeComponent, StringBuilder> fields = new HashMap<>();
+		Table table = new Table();
+		table.addColumn();
+
+		Map<DataTypeComponent, Integer> rows = new HashMap<>();
+		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
-			// Skip struct padding
-			if (!field.getDataType().equals(DefaultDataType.dataType)) {
-				fields.put(field, new StringBuilder()
+			if (field.getDataType().equals(DefaultDataType.dataType)) {
+				padding += field.getLength();
+			} else {
+				if (padding != 0) {
+					int row = table.addRow();
+					table.get(row, 0)
+						.append("\t// char padding[")
+						.append(padding)
+						.append("];");
+					padding = 0;
+				}
+
+				int row = table.addRow();
+				rows.put(field, row);
+				table.get(row, 0)
 					.append("\t")
 					.append(field.getDataType().getName())
 					.append(" ")
 					.append(field.getFieldName())
-					.append(";"));
+					.append(";");
 			}
 		}
-
-		int maxLen = fields.values().stream()
-			.mapToInt(str -> str.length())
-			.max()
-			.orElse(0);
-		for (StringBuilder str : fields.values()) {
-			while (str.length() < maxLen) {
-				str.append(" ");
-			}
+		if (padding != 0) {
+			int row = table.addRow();
+			table.get(row, 0)
+				.append("\t// char padding[")
+				.append(padding)
+				.append("];");
 		}
 
 		List<AccessPattern> structPatterns = new ArrayList<>(patterns.getPatterns(struct));
@@ -180,36 +193,16 @@ public class StructOrderAnalysis extends GhidraScript {
 			.<AccessPattern>comparingInt(p -> patterns.getCount(struct, p))
 			.reversed());
 		for (AccessPattern pattern : structPatterns) {
-			for (Map.Entry<DataTypeComponent, StringBuilder> entry : fields.entrySet()) {
-				DataTypeComponent field = entry.getKey();
-				StringBuilder str = entry.getValue();
-				if (pattern.getFields().contains(field)) {
-					str.append(" *");
-				} else {
-					str.append("  ");
-				}
+			int col = table.addColumn();
+			for (DataTypeComponent field : pattern.getFields()) {
+				table.get(rows.get(field), col)
+					.append(patterns.getCount(struct, pattern));
 			}
 		}
 
 		System.out.print("\nOriginal layout:\n\n");
 		System.out.format("struct %s {\n", struct.getName());
-		int padding = 0;
-		for (DataTypeComponent field : struct.getComponents()) {
-			StringBuilder str = fields.get(field);
-			if (str == null) {
-				padding += field.getLength();
-			} else {
-				if (padding != 0) {
-					System.out.format("\t// char padding[%d];\n", padding);
-					padding = 0;
-				}
-				System.out.println(str);
-			}
-		}
-		if (padding != 0) {
-			System.out.format("\t// char padding[%d];\n", padding);
-			padding = 0;
-		}
+		System.out.print(table);
 		System.out.print("};\n\n");
 
 		System.out.print("Access patterns:\n\n");
@@ -227,6 +220,88 @@ public class StructOrderAnalysis extends GhidraScript {
 			System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
 		}
 		System.out.print("};\n\n--\n");
+	}
+}
+
+/**
+ * A properly aligned table.
+ */
+class Table {
+	private final List<List<StringBuilder>> rows = new ArrayList<>();
+	private int nCols = 0;
+
+	/**
+	 * @return The number of rows.
+	 */
+	int nRows() {
+		return this.rows.size();
+	}
+
+	/**
+	 * @return The number of columns.
+	 */
+	int nColumns() {
+		return nCols;
+	}
+
+	/**
+	 * @return The index of the new row.
+	 */
+	int addRow() {
+		List<StringBuilder> row = new ArrayList<>();
+		for (int i = 0; i < this.nCols; ++i) {
+			row.add(new StringBuilder());
+		}
+		this.rows.add(row);
+		return this.rows.size() - 1;
+	}
+
+	/**
+	 * Add a new column.
+	 */
+	int addColumn() {
+		for (List<StringBuilder> row : this.rows) {
+			row.add(new StringBuilder());
+		}
+		return this.nCols++;
+	}
+
+	/**
+	 * @return The StringBuilder in the given cell.
+	 */
+	StringBuilder get(int row, int col) {
+		return this.rows.get(row).get(col);
+	}
+
+	@Override
+	public String toString() {
+		List<Integer> widths = new ArrayList<>();
+		for (int i = 0; i < this.nCols; ++i) {
+			int width = 0;
+			for (List<StringBuilder> row : this.rows) {
+				int curWidth = row.get(i).length();
+				if (width < curWidth) {
+					width = curWidth;
+				}
+			}
+			widths.add(width + 1);
+		}
+
+		StringBuilder result = new StringBuilder();
+		for (List<StringBuilder> row : this.rows) {
+			for (int i = 0; i < this.nCols; ++i) {
+				StringBuilder cell = row.get(i);
+				result.append(cell);
+
+				int width = widths.get(i);
+				for (int j = cell.length(); j < width; ++j) {
+					result.append(' ');
+				}
+			}
+			result.append('\n');
+		}
+
+		return result.toString();
 	}
 }
 
