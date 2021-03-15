@@ -14,7 +14,7 @@ GHIDRA_HEADLESS=${GHIDRA_HEADLESS:-/usr/local/share/ghidra/support/analyzeHeadle
 
 mkdir -p "$ROOT/ghidra-projects"
 
-$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -import "$FULL" -postScript DWARF_ExtractorScript.java
+$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -import "$FULL" -processor x86:LE:64:default -cspec gcc -postScript DWARF_ExtractorScript.java
 
 shift
-$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$ROOT/data/address_info.csv" "$@"
+$GHIDRA_HEADLESS "$ROOT/ghidra-projects" "$SHORT" -process "$SHORT" -processor x86:LE:64:default -cspec gcc -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$ROOT/data/address_info.csv" "$@"
