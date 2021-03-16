@@ -41,6 +41,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
+import com.google.common.collect.Multisets;
 import com.google.common.collect.SetMultimap;
 
 import java.io.BufferedReader;
@@ -155,60 +156,9 @@ public class StructOrderAnalysis extends GhidraScript {
 	}
 
 	private void printOriginal(AccessPatterns patterns, Structure struct) {
-		Table table = new Table();
-		table.addColumn();
+		System.out.print("\nAccess patterns:\n\n");
 
-		Map<DataTypeComponent, Integer> rows = new HashMap<>();
-		int padding = 0;
-		for (DataTypeComponent field : struct.getComponents()) {
-			if (field.getDataType().equals(DefaultDataType.dataType)) {
-				padding += field.getLength();
-			} else {
-				if (padding != 0) {
-					int row = table.addRow();
-					table.get(row, 0)
-						.append("\t// char padding[")
-						.append(padding)
-						.append("];");
-					padding = 0;
-				}
-
-				int row = table.addRow();
-				rows.put(field, row);
-				table.get(row, 0)
-					.append("\t")
-					.append(field.getDataType().getName())
-					.append(" ")
-					.append(field.getFieldName())
-					.append(";");
-			}
-		}
-		if (padding != 0) {
-			int row = table.addRow();
-			table.get(row, 0)
-				.append("\t// char padding[")
-				.append(padding)
-				.append("];");
-		}
-
-		List<AccessPattern> structPatterns = new ArrayList<>(patterns.getPatterns(struct));
-		Collections.sort(structPatterns, Comparator
-			.<AccessPattern>comparingInt(p -> patterns.getCount(struct, p))
-			.reversed());
-		for (AccessPattern pattern : structPatterns) {
-			int col = table.addColumn();
-			for (DataTypeComponent field : pattern.getFields()) {
-				table.get(rows.get(field), col)
-					.append(patterns.getCount(struct, pattern));
-			}
-		}
-
-		System.out.print("\nOriginal layout:\n\n");
-		System.out.format("struct %s {\n", struct.getName());
-		System.out.print(table);
-		System.out.print("};\n\n");
-
-		System.out.print("Access patterns:\n\n");
+		Set<AccessPattern> structPatterns = patterns.getPatterns(struct);
 		for (AccessPattern pattern : structPatterns) {
 			int count = patterns.getCount(struct, pattern);
 			System.out.format("%s (%d times)\n", pattern, count);
@@ -217,18 +167,113 @@ public class StructOrderAnalysis extends GhidraScript {
 			}
 			System.out.println();
 		}
+
+		Table table = new Table();
+		table.addColumn(); // Field type
+		table.addColumn(); // Field name
+
+		table.addRow();
+		table.get(0, 0)
+			.append("struct ")
+			.append(struct.getName())
+			.append(" {");
+
+		Map<DataTypeComponent, Integer> rows = new HashMap<>();
+		int padding = 0;
+		for (DataTypeComponent field : struct.getComponents()) {
+			if (field.getDataType().equals(DefaultDataType.dataType)) {
+				padding += field.getLength();
+			} else {
+				addPadding(table, padding);
+				padding = 0;
+
+				int row = addField(table, field);
+				rows.put(field, row);
+			}
+		}
+		addPadding(table, padding);
+
+		int commentCol = table.addColumn();
+		table.get(0, commentCol).append("//");
+		for (int row : rows.values()) {
+			table.get(row, commentCol).append("//");
+		}
+
+		int total = patterns.getCount(struct);
+		int count = 0;
+		for (AccessPattern pattern : structPatterns) {
+			int col = table.addColumn();
+
+			int percent = 100 * patterns.getCount(struct, pattern) / total;
+			table.get(0, col)
+				.append(percent)
+				.append("%");
+
+			for (DataTypeComponent field : pattern.getFields()) {
+				table.get(rows.get(field), col).append("*");
+			}
+
+			// Don't make the table too wide
+			if (++count >= 4) {
+				break;
+			}
+		}
+		if (structPatterns.size() > count) {
+			int col = table.addColumn();
+			table.get(0, col).append("...");
+		}
+
+		System.out.print("Original layout:\n\n");
+		System.out.print(table);
+		System.out.print("};\n\n");
 	}
 
 	private void printOptimized(Structure struct) {
 		System.out.print("Suggested layout:\n\n");
-
 		System.out.format("struct %s {\n", struct.getName());
+
+		Table table = new Table();
+		table.addColumn(); // Field type
+		table.addColumn(); // Field name
+
+		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
-			if (!field.getDataType().equals(DefaultDataType.dataType)) {
-				System.out.format("\t%s %s;\n", field.getDataType().getName(), field.getFieldName());
+			if (field.getDataType().equals(DefaultDataType.dataType)) {
+				padding += field.getLength();
+			} else {
+				addPadding(table, padding);
+				padding = 0;
+
+				addField(table, field);
 			}
 		}
+		addPadding(table, padding);
+
+		System.out.print(table);
 		System.out.print("};\n\n--\n");
+	}
+
+	private int addField(Table table, DataTypeComponent field) {
+		int row = table.addRow();
+		table.get(row, 0)
+			.append("        ")
+			.append(field.getDataType().getName());
+		table.get(row, 1)
+			.append(field.getFieldName())
+			.append(";");
+		return row;
+	}
+
+	private void addPadding(Table table, int padding) {
+		if (padding != 0) {
+			int row = table.addRow();
+			table.get(row, 0)
+				.append("        // char");
+			table.get(row, 1)
+				.append("padding[")
+				.append(padding)
+				.append("];");
+		}
 	}
 }
 
@@ -874,10 +919,18 @@ class AccessPatterns {
 	}
 
 	/**
-	 * @return All the access patterns we saw for a structure.
+	 * @return All the access patterns we saw for a structure, from most to least often.
 	 */
 	Set<AccessPattern> getPatterns(Structure struct) {
-		return this.patterns.get(struct).elementSet();
+		return Multisets.copyHighestCountFirst(this.patterns.get(struct))
+			.elementSet();
+	}
+
+	/**
+	 * @return The total number of accesses to a struct.
+	 */
+	int getCount(Structure struct) {
+		return this.patterns.get(struct).size();
 	}
 
 	/**
@@ -915,19 +968,33 @@ class AccessPatterns {
 	 */
 	Structure optimize(Structure struct) {
 		List<DataTypeComponent> fields = new ArrayList<>();
+
+		// Pack the most common access patterns first
+		for (AccessPattern pattern : getPatterns(struct)) {
+			List<DataTypeComponent> patternFields = new ArrayList<>(pattern.getFields());
+
+			// Sort by highest alignment first to reduce holes
+			Collections.sort(patternFields, Comparator
+				.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
+				.thenComparingInt(f -> f.getDataType().getLength())
+				.reversed());
+
+			for (DataTypeComponent field : patternFields) {
+				if (!fields.contains(field)) {
+					fields.add(field);
+				}
+			}
+		}
+
+		// Add any missing fields we didn't see get accessed
 		for (DataTypeComponent field : struct.getComponents()) {
 			// Skip padding
-			if (!field.getDataType().equals(DefaultDataType.dataType)) {
+			if (!field.getDataType().equals(DefaultDataType.dataType) && !fields.contains(field)) {
 				fields.add(field);
 			}
 		}
 
-		Collections.sort(fields, Comparator
-			.<DataTypeComponent>comparingInt(f -> getCount(f))
-			.reversed());
-
-		// Sort the fields by our estimated cost
-		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0);
+		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
 		for (DataTypeComponent field : fields) {
 			optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
 		}
