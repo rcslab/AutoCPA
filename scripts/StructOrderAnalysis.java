@@ -968,19 +968,33 @@ class AccessPatterns {
 	 */
 	Structure optimize(Structure struct) {
 		List<DataTypeComponent> fields = new ArrayList<>();
+
+		// Pack the most common access patterns first
+		for (AccessPattern pattern : getPatterns(struct)) {
+			List<DataTypeComponent> patternFields = new ArrayList<>(pattern.getFields());
+
+			// Sort by highest alignment first to reduce holes
+			Collections.sort(patternFields, Comparator
+				.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
+				.thenComparingInt(f -> f.getDataType().getLength())
+				.reversed());
+
+			for (DataTypeComponent field : patternFields) {
+				if (!fields.contains(field)) {
+					fields.add(field);
+				}
+			}
+		}
+
+		// Add any missing fields we didn't see get accessed
 		for (DataTypeComponent field : struct.getComponents()) {
 			// Skip padding
-			if (!field.getDataType().equals(DefaultDataType.dataType)) {
+			if (!field.getDataType().equals(DefaultDataType.dataType) && !fields.contains(field)) {
 				fields.add(field);
 			}
 		}
 
-		Collections.sort(fields, Comparator
-			.<DataTypeComponent>comparingInt(f -> getCount(f))
-			.reversed());
-
-		// Sort the fields by our estimated cost
-		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0);
+		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
 		for (DataTypeComponent field : fields) {
 			optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
 		}
