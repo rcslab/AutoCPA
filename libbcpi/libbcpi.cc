@@ -1067,6 +1067,40 @@ bcpi_print_summary(const struct bcpi_record *r)
 }
 
 void
+bcpi_dump_edges(struct bcpi_record *record, struct bcpi_node *node)
+{
+	for (int i = 0; i < node->num_incoming_edge; i++) {
+		printf("        Edge from %08lx",
+		    node->edge_list[i].from->node_address);
+		for (int c = 0; c < record->num_counter; c++) {
+			printf(" %8ld", node->edge_list[i].counters[c]);
+		}
+		printf("\n");
+	}
+}
+
+void
+bcpi_dump_nodes(struct bcpi_record *record)
+{
+	for (int i = 0; i < record->num_object; i++) {
+		struct bcpi_object *o = &record->object_list[i];
+
+		printf("Object ID %d Path %s\n", o->object_index, o->path);
+
+		for (int j = 0; j < o->num_node; j++) {
+			struct bcpi_node *n = &o->node_list[j];
+
+			printf("    Address %08lx", n->node_address);
+			for (int k = 0; k < record->num_counter; k++) {
+				printf(" %8ld", n->terminal_counters[i]);
+			}
+			printf("\n");
+			bcpi_dump_edges(record, n);
+		}
+	}
+}
+
+void
 bcpi_show_node_info(
     struct bcpi_record *r, struct bcpi_node *n, const char *sort_crit)
 {

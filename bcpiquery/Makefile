@@ -1,5 +1,5 @@
 PROG_CXX=bcpiquery
-SRCS= main.cc check.cc extract.cc util.cc find_an_address.cc
+SRCS= main.cc check.cc dump.cc extract.cc functions.cc programs.cc elfutil.cc util.cc
 
 LDADD= -L../libbcpi -lz -ldwarf -lelf -lbcpi
 

@@ -22,7 +22,7 @@
 
 #include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
-#include "find_an_address.h"
+#include "elfutil.h"
 #include "util.h"
 
 #define BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH "/usr/lib/debug"
@@ -70,34 +70,18 @@ check_recurse_condition(
 }
 
 static uint64_t
-get_revised_addr(const char *object_path, uint64_t offset)
+get_revised_addr(const std::string &object, uint64_t offset)
 {
 	int rc = -1;
 	uint64_t revised_addr;
 
-	rc = search_addr(object_path, offset, &revised_addr);
+	rc = search_addr(object, offset, &revised_addr);
 	if (rc == 1)
 		return (0);
 	if (rc == 0)
 		return (revised_addr);
 
 	return (0);
-}
-
-static std::string
-util_find_symbols(const std::string &s)
-{
-	std::string symbolpath;
-
-	symbolpath = BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH + s + ".debug";
-
-	std::cout << "foo" << symbolpath << std::endl;
-
-	if (access(symbolpath.c_str(), R_OK) == -1) {
-		return (s);
-	}
-
-	return (symbolpath);
 }
 
 void
@@ -122,9 +106,6 @@ util_traverse(const util_query_parameter &u, int cur_level, bcpi_node *n)
 		printf("%*c<- %ld : %lx (%s) ", cur_level, ' ', value,
 		    from->node_address, from->object->path);
 
-		std::string debug_info = util_find_symbols(from->object->path);
-		// cout << check_addr(from->object->path, debug_info.c_str(),
-		// from->node_address) << endl;
 		if (check_recurse_condition(u, cur_level + 1, from)) {
 			util_traverse(u, cur_level + 1, from);
 		}
@@ -210,11 +191,6 @@ util_process(util_query_parameter &u)
 			    n->object->path);
 		fprintf(f, "%ld,%lx\n", value,
 		    get_revised_addr(n->object->path, n->node_address));
-		// printf("* %ld: %lx (%s) ", value, n->node_address,
-		// n->object->path); fprintf(f, "%ld, %lx\n", value,
-		// n->node_address); string debug_info =
-		// util_get_object_path(n->object->path); cout<<"This is
-		// T"<<endl;
 		if (verbose)
 			bcpi_show_node_info(records[0], n, u.counter_name);
 	}

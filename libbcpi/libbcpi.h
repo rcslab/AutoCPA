@@ -87,6 +87,7 @@ int bcpi_get_index_from_name(struct bcpi_record *record, const char *name);
 void bcpi_print_summary(const struct bcpi_record *r);
 int bcpi_merge(
     struct bcpi_record **out, const struct bcpi_record **list, int num);
+void bcpi_dump_nodes(struct bcpi_record *r);
 void bcpi_show_node_info(
     struct bcpi_record *r, struct bcpi_node *, const char *sort_criteria);
 

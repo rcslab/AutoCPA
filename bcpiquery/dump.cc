@@ -25,49 +25,46 @@
 #include "elfutil.h"
 #include "util.h"
 
-int
-check_file(const std::string &f)
+struct util_query_parameter {
+	std::vector<std::string> files;
+};
+
+/*
+ * Do not visit the same node twice; do not go too deep when traversing.
+ */
+
+static void
+util_process(util_query_parameter &u)
 {
-	int fd;
-	off_t filesz;
-	void *buf;
+	std::vector<struct bcpi_node *> nodes;
 
-	if ((fd = open(f.c_str(), O_RDONLY)) == -1) {
-		perror("open");
-		return (1);
+	for (size_t i = 0; i < u.files.size(); i++) {
+		struct bcpi_record *record;
+
+		if (bcpi_load_file(u.files[i].c_str(), &record) < 0) {
+			fprintf(stderr, "Failed to load bcpi file '%s'\n",
+			    u.files[i].c_str());
+		}
+
+		std::cout << "File " << u.files[i] << std::endl;
+		bcpi_print_summary(record);
+		bcpi_dump_nodes(record);
 	}
-
-	filesz = lseek(fd, 0, SEEK_END);
-	lseek(fd, 0, SEEK_SET);
-
-	buf = mmap(0, filesz, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (buf == MAP_FAILED) {
-		perror("mmap");
-		return (1);
-	}
-
-	uint32_t hash = bcpi_crc32(buf, filesz);
-
-	if (munmap(buf, filesz) == -1) {
-		perror("munmap");
-	}
-
-	if (close(fd) == -1) {
-		perror("close");
-	}
-
-	fprintf(stdout, "%s %x\n", f.c_str(), hash);
-
-	return (0);
 }
 
 void
-check_usage()
+dump_usage()
 {
 	fprintf(stderr,
-	    "Usage: bcpiquery checksum [OPTIONS]\n"
+	    "Usage: bcpiquery -c [COUNTER] [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
+	    "\t-n n -- Show top n nodes\n"
+	    "\t-d d -- Traverse up to d levels deep\n"
+	    "\t-e e -- Show top e edges\n"
+	    "\t-o o -- Only show object at o\n"
+	    "\t-c c -- Show callchain concerning counter name c\n"
+	    "\t-k file -- Compute checksum of file\n"
 	    "\t-f name -- Process file with name\n");
 	fprintf(stderr, "\t-p path -- Path to bcpid files (default: %s)\n",
 	    BCPID_DEFAULT_PATH);
@@ -85,26 +82,28 @@ static struct option longopts[] = {
 };
 
 int
-check_cmd(int argc, char **argv)
+dump_cmd(int argc, char **argv)
 {
 	int opt;
-	int errors = 0;
-	std::vector<std::string> files;
 	struct util_file_filter f;
+	struct util_query_parameter u;
 
-	f.verbose = false;
 	f.bcpi_path = BCPID_DEFAULT_PATH;
 	f.filter_hostname = "";
 	f.filter_begin = "";
 	f.filter_end = "";
 
-	while ((opt = getopt_long(argc, argv, "hf:", longopts, NULL)) != -1) {
+	while ((opt = getopt_long(
+		    argc, argv, "hf:n:d:e:c:o:k:p:v", longopts, NULL)) != -1) {
 		switch (opt) {
 		case 'h':
-			check_usage();
-			break;
+			dump_usage();
+			return (EX_OK);
 		case 'f':
-			files.push_back(optarg);
+			u.files.push_back(optarg);
+			break;
+		case 'p':
+			f.bcpi_path = optarg;
 			break;
 		case 1000:
 			f.filter_hostname = optarg;
@@ -120,23 +119,17 @@ check_cmd(int argc, char **argv)
 		}
 	}
 
-	if (files.size() == 0) {
-		files = util_filter_files(&f);
+	if (u.files.size() == 0) {
+		u.files = util_filter_files(&f);
 	}
 
-	if (files.size() == 0) {
+	if (u.files.size() == 0) {
 		fprintf(stderr, "No file names specified or found in '%s'\n",
 		    f.bcpi_path.c_str());
-		return (EX_USAGE);
+		exit(EX_USAGE);
 	}
 
-	for (auto &f : files) {
-		errors += check_file(f);
-	}
-	if (errors) {
-		fprintf(stderr, "Found %d errors\n", errors);
-		return (EX_DATAERR);
-	}
+	util_process(u);
 
 	return (EX_OK);
 }

@@ -22,17 +22,17 @@
 
 #include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
-#include "find_an_address.h"
-
-#define BCPI_UTIL_SYSTEM_DEBUG_INFO_PATH "/usr/lib/debug"
 
 #define DECL_COMMAND(_x)                      \
 	int _x##_cmd(int argc, char *argv[]); \
 	void _x##_usage();
 
-DECL_COMMAND(help);
-DECL_COMMAND(extract);
 DECL_COMMAND(check);
+DECL_COMMAND(dump);
+DECL_COMMAND(extract);
+DECL_COMMAND(functions);
+DECL_COMMAND(help);
+DECL_COMMAND(programs);
 
 struct command {
 	std::string name;
@@ -43,9 +43,14 @@ struct command {
 
 static std::vector<command> commands = {
 	{ "check", "Validate bcpi dumps", check_cmd, check_usage },
-	{ "help", "Show display help", help_cmd, help_usage },
+	{ "dump", "Dump bcpi internal structures for debugging", dump_cmd,
+	    dump_usage },
 	{ "extract", "Extract address info for analysis", extract_cmd,
 	    extract_usage },
+	{ "functions", "Show top functions", functions_cmd, functions_usage },
+	{ "help", "Show display help", help_cmd, help_usage },
+	{ "programs", "Show top programs and libraries", programs_cmd,
+	    programs_usage },
 };
 
 static command *
@@ -75,6 +80,11 @@ help_cmd(int argc, char *argv[])
 	fprintf(stderr, "\nCommands:\n");
 	for (auto &c : commands)
 		fprintf(stderr, "\t%-10s %s\n", c.name.c_str(), c.desc.c_str());
+
+	fprintf(stderr, "\nEnvironment Variables:\n");
+	fprintf(stderr,
+	    "\tBCPI_SYSROOT -- Sysroot path for binaries and symbols\n");
+	fprintf(stderr, "\tBCPI_SYMPATH -- Absolute path to symbols\n");
 
 	return ((argc > 2) ? EX_USAGE : EX_OK);
 }
