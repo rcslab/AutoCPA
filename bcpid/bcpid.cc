@@ -91,7 +91,7 @@ bcpid_signal_init(void (*signal_handler)(int num))
 #define BCPID_KERN_BASE 0x7fff00000000UL
 
 // A writable directory to place compressed sample data
-#define BCPID_OUTPUT_DIRECTORY "/var/tmp/"
+#define BCPID_OUTPUT_DIRECTORY "/var/tmp"
 
 // Force sample data to be saved on disk and
 // purged from main memory when number of call graph
@@ -470,6 +470,15 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
 	ko.start = start;
 
 	b->kernel_objects.push_back(ko);
+}
+
+void
+bcpid_event_handler_mapout(struct bcpid *b, const struct pmclog_ev *ev)
+{
+	const struct pmclog_ev_map_out *mo = &ev->pl_u.pl_mo;
+	pid_t pid = mo->pl_pid;
+	uintfptr_t start = mo->pl_start;
+	uintfptr_t end = mo->pl_end;
 }
 
 /*
@@ -878,6 +887,7 @@ bcpid_init_proc(struct bcpid *b, int pid)
 
 	procstat_freevmmap(b->procstat, vm);
 	procstat_freeprocs(b->procstat, kproc);
+
 	return exec;
 }
 
@@ -992,24 +1002,29 @@ bcpid_event_handler_proc_exec(struct bcpid *b, const struct pmclog_ev *ev)
 	const struct pmclog_ev_procexec *pe = &ev->pl_u.pl_x;
 	const char *main_object_path = pe->pl_pathname;
 
-	auto oit = b->path_to_object.find(std::string(main_object_path));
-	if (oit == b->path_to_object.end()) {
-		return;
+	auto prog = b->pid_to_program.find(pe->pl_pid);
+	if (prog != b->pid_to_program.end()) {
+		delete prog->second;
+		b->pid_to_program.erase(prog);
 	}
 
-	struct stat s;
-	int status = stat(main_object_path, &s);
-	if (status == -1) {
-		return;
-	}
+	auto obj = b->path_to_object.find(std::string(main_object_path));
+	if (obj != b->path_to_object.end()) {
+		struct stat s;
+		int status = stat(main_object_path, &s);
+		if (status == -1) {
+			return;
+		}
 
-	struct timespec *ts = &s.st_mtim;
-	if (!memcmp(ts, &oit->second->last_modified, sizeof(*ts))) {
-		return;
-	}
+		struct timespec *ts = &s.st_mtim;
+		if (!memcmp(ts, &obj->second->last_modified, sizeof(*ts))) {
+			return;
+		}
 
-	MSG("saving due to newer executable: %s", main_object_path);
-	bcpid_save(b);
+		MSG("Saving because of updated executable: %s",
+		    main_object_path);
+		bcpid_save(b);
+	}
 }
 
 void
@@ -1057,6 +1072,9 @@ bcpid_register_handlers(struct bcpid *b)
 	ev = &b->pmclog_events[PMCLOG_TYPE_MAP_IN];
 	ev->handler = bcpid_event_handler_mapin;
 
+	ev = &b->pmclog_events[PMCLOG_TYPE_MAP_OUT];
+	ev->handler = bcpid_event_handler_mapout;
+
 	ev = &b->pmclog_events[PMCLOG_TYPE_CALLCHAIN];
 	ev->handler = bcpid_event_handler_callchain;
 
@@ -1068,6 +1086,9 @@ bcpid_register_handlers(struct bcpid *b)
 
 	ev = &b->pmclog_events[PMCLOG_TYPE_PROCFORK];
 	ev->handler = bcpid_event_handler_proc_fork;
+
+	ev = &b->pmclog_events[PMCLOG_TYPE_PROCEXEC];
+	ev->handler = bcpid_event_handler_proc_exec;
 }
 
 /*

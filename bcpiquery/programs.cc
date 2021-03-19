@@ -147,10 +147,10 @@ util_process(util_query_parameter &u)
 		sorted_samples.push_back(s.second);
 	}
 	sort(sorted_samples.begin(), sorted_samples.end(),
-	    [&u](Sample a, Sample b) {
+	    [&u](const Sample &a, const Sample &b) {
 		    if (u.counter_name)
-			    return (a.counters[u.counter_name] >
-				b.counters[u.counter_name]);
+			    return (a.counters.at(u.counter_name) >
+				b.counters.at(u.counter_name));
 		    else
 			    return (a.total() > b.total());
 	    });
