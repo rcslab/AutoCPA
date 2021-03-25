@@ -20,7 +20,6 @@
 #include <iostream>
 #include <string>
 
-#include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
 #include "elfutil.h"
 #include "util.h"
@@ -36,10 +35,10 @@ struct util_query_parameter {
 static void
 util_process(util_query_parameter &u)
 {
-	std::vector<struct bcpi_node *> nodes;
+	std::vector<bcpi_node *> nodes;
 
 	for (size_t i = 0; i < u.files.size(); i++) {
-		struct bcpi_record *record;
+		bcpi_record record;
 
 		if (bcpi_load_file(u.files[i].c_str(), &record) < 0) {
 			fprintf(stderr, "Failed to load bcpi file '%s'\n",
@@ -56,7 +55,7 @@ void
 dump_usage()
 {
 	fprintf(stderr,
-	    "Usage: bcpiquery -c [COUNTER] [OPTIONS]\n"
+	    "Usage: bcpiquery dump -c [COUNTER] [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
 	    "\t-n n -- Show top n nodes\n"

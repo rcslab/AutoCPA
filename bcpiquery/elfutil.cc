@@ -133,8 +133,10 @@ load_sections(Elf *e, size_t shnum)
 	if (!elf_getshstrndx(e, &shstrndx))
 		errx(EXIT_FAILURE, "elf_getshstrndx() failed: %s.",
 		    elf_errmsg(-1));
-	if ((scn = elf_getscn(e, 0)) == NULL)
-		return NULL;
+	if ((scn = elf_getscn(e, 0)) == NULL) {
+		free(sl);
+		return (NULL);
+	}
 
 	(void)elf_errno();
 
@@ -189,7 +191,7 @@ load_sections(Elf *e, size_t shnum)
 	if (elferr != 0)
 		warnx("elf_nextscn failed: %s", elf_errmsg(elferr));
 
-	return sl;
+	return (sl);
 }
 
 static uint64_t
@@ -203,12 +205,13 @@ change_offset(Elf *e, uint64_t addr)
 		    elf_errmsg(-1));
 	if (shnum == 0) {
 		printf("\nThere are no sections in this file.\n");
-		// return;
+		return (0);
 	}
 
 	s = load_sections(e, shnum);
 	if (!s) {
 		warnx("load_sections returned null: failed to load sections!");
+		return (0);
 	}
 
 	for (size_t i = 0; i < shnum; i++) {
@@ -220,8 +223,7 @@ change_offset(Elf *e, uint64_t addr)
 		}
 	}
 
-	printf("not found!\n");
-	return 0;
+	return (0);
 }
 
 int
@@ -241,7 +243,7 @@ search_addr(
 	if ((fd = open(path.c_str(), O_RDONLY)) < 0) {
 		perror("open");
 		std::cerr << "error in fd_elf " << objpath << std::endl;
-		return 1;
+		return (1);
 	}
 
 	if ((e = elf_begin(fd, ELF_C_READ, NULL)) == NULL)
@@ -252,7 +254,7 @@ search_addr(
 	elf_end(e);
 	close(fd);
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -428,7 +430,7 @@ lookup_object(std::string object)
 		objcache[object] = obj;
 	}
 
-	return &objcache[object];
+	return (&objcache[object]);
 }
 
 void
@@ -462,10 +464,10 @@ search_symbol(const std::string &objpath, Dwarf_Addr addr)
 	find_func(obj->dbg, pc, &namedie, &valid);
 
 	if (valid) {
-		return namedie;
+		return (namedie);
 	} else {
 		std::stringstream s;
 		s << "0x" << std::hex << pc;
-		return s.str();
+		return (s.str());
 	}
 }

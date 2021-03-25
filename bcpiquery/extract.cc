@@ -20,7 +20,6 @@
 #include <iostream>
 #include <string>
 
-#include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
 #include "elfutil.h"
 #include "util.h"
@@ -87,7 +86,7 @@ get_revised_addr(const std::string &object, uint64_t offset)
 void
 util_traverse(const util_query_parameter &u, int cur_level, bcpi_node *n)
 {
-	std::vector<struct bcpi_edge *> edges;
+	std::vector<bcpi_edge *> edges;
 	bcpi_collect_edge(n, edges);
 	bcpi_edge_sort(u.counter_index, edges);
 	int traverse_node;
@@ -95,8 +94,8 @@ util_traverse(const util_query_parameter &u, int cur_level, bcpi_node *n)
 	traverse_node = std::min(edges.size(), u.top_n_edge);
 
 	for (size_t i = 0; i < traverse_node; ++i) {
-		struct bcpi_edge *e = edges[i];
-		struct bcpi_node *from = e->from;
+		bcpi_edge *e = edges[i];
+		bcpi_node *from = e->from;
 		uint64_t value = e->counters[u.counter_index];
 
 		if (!value) {
@@ -104,7 +103,7 @@ util_traverse(const util_query_parameter &u, int cur_level, bcpi_node *n)
 		}
 
 		printf("%*c<- %ld : %lx (%s) ", cur_level, ' ', value,
-		    from->node_address, from->object->path);
+		    from->node_address, from->object->path.c_str());
 
 		if (check_recurse_condition(u, cur_level + 1, from)) {
 			util_traverse(u, cur_level + 1, from);
@@ -115,12 +114,13 @@ util_traverse(const util_query_parameter &u, int cur_level, bcpi_node *n)
 void
 util_process(util_query_parameter &u)
 {
-	std::vector<struct bcpi_node *> nodes;
-	std::vector<struct bcpi_record *> records;
+	std::vector<bcpi_node *> nodes;
+	std::vector<bcpi_record> records;
+
 	for (size_t i = 0; i < u.files.size(); i++) {
 		int index;
-		std::vector<struct bcpi_object *> objects;
-		struct bcpi_record *record;
+		std::vector<bcpi_object *> objects;
+		auto &record = records.emplace_back();
 
 		if (bcpi_load_file(u.files[i].c_str(), &record) < 0) {
 			fprintf(stderr, "Failed to load bcpi file '%s'\n",
@@ -137,7 +137,6 @@ util_process(util_query_parameter &u)
 
 		if (verbose)
 			bcpi_print_summary(record);
-		records.push_back(record);
 
 		// We set the counter_index on the first matching file
 		if (records.size() == 1) {
@@ -153,14 +152,15 @@ util_process(util_query_parameter &u)
 		}
 
 		if (u.object_name) {
-			bcpi_collect_object(record, objects, u.object_name);
+			bcpi_collect_object(&record, objects, u.object_name);
 			// here only the objects that we are interested in are
 			// loaded into objects
 			for (auto o : objects) {
-				bcpi_collect_node_from_object(record, nodes, o);
+				bcpi_collect_node_from_object(
+				    &record, nodes, o);
 			}
 		} else {
-			bcpi_collect_node(record, nodes);
+			bcpi_collect_node(&record, nodes);
 		}
 	}
 	// call node merge here
@@ -177,22 +177,20 @@ util_process(util_query_parameter &u)
 	traverse_node = std::min(u.top_n_node, nodes.size());
 
 	for (size_t i = 0; i < traverse_node; ++i) {
-		struct bcpi_node *n = nodes[i];
+		bcpi_node *n = nodes[i];
 		uint64_t value = n->terminal_counters[u.counter_index];
 		if (!value) {
 			break;
 		}
 
-		// cout <<hex<<get_revised_addr(n->object->path,
-		// n->node_address) << endl;
 		if (verbose)
 			printf("* %ld: %lx (%s) ", value,
 			    get_revised_addr(n->object->path, n->node_address),
-			    n->object->path);
+			    n->object->path.c_str());
 		fprintf(f, "%ld,%lx\n", value,
 		    get_revised_addr(n->object->path, n->node_address));
 		if (verbose)
-			bcpi_show_node_info(records[0], n, u.counter_name);
+			bcpi_show_node_info(&records[0], n, u.counter_name);
 	}
 	printf("Found %d nodes\n", traverse_node);
 
@@ -205,7 +203,7 @@ void
 extract_usage()
 {
 	fprintf(stderr,
-	    "Usage: bcpiquery -c [COUNTER] [OPTIONS]\n"
+	    "Usage: bcpiquery extract -c COUNTER [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
 	    "\t-n n -- Show top n nodes\n"

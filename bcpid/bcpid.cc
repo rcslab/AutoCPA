@@ -21,6 +21,7 @@
 #include <strings.h>
 #include <sysexits.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #include <algorithm>
 #include <map>
@@ -30,7 +31,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
 #include "debug.h"
 
@@ -356,7 +356,8 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 		return;
 	}
 
-	uint32_t hash = bcpi_crc32(file_content, file_size);
+	uint32_t hash = crc32(
+	    0, (const unsigned char *)file_content, file_size);
 
 	status = munmap(file_content, file_size);
 	if (status == -1) {
@@ -580,27 +581,26 @@ void bcpid_stop_all(struct bcpid *);
 void
 bcpid_save(struct bcpid *b)
 {
-	struct bcpi_record *record = (struct bcpi_record *)malloc(
-	    sizeof(*record));
-	record->epoch = time(0);
+	bcpi_record record;
+
+	record.major_version = BCPI_MAJOR_VERSION;
+	record.minor_version = BCPI_MINOR_VERSION;
+	record.flags = BCPI_DEFAULT_FLAGS;
+
+	record.epoch_end = time(nullptr);
 
 	// Embed system description in the file
 	struct utsname uts;
 	int status = uname(&uts);
 	if (status < 0) {
 		PERROR("uname");
-		record->system_name = strdup("");
+		record.system_name = "";
 	} else {
 		char system_name[255];
 		snprintf(system_name, 255, "%s %s %s %s %s", uts.sysname,
 		    uts.release, uts.version, uts.nodename, uts.machine);
-		record->system_name = strdup(system_name);
+		record.system_name = system_name;
 	}
-
-	int num_counter = bcpid_num_active_counter(b);
-	record->num_counter = num_counter;
-	record->counter_name = (const char **)malloc(
-	    sizeof(*record->counter_name) * num_counter);
 
 	int name_index = 0;
 	int index_mapping[BCPI_MAX_NUM_COUNTER];
@@ -610,7 +610,7 @@ bcpid_save(struct bcpid *b)
 			continue;
 		}
 
-		record->counter_name[name_index] = strdup(ctr->name);
+		record.counters.emplace_back(ctr->name);
 		index_mapping[name_index] = i;
 		++name_index;
 	}
@@ -626,14 +626,11 @@ bcpid_save(struct bcpid *b)
 		++num_object;
 	}
 
-	record->num_object = num_object;
-	record->object_list = (struct bcpi_object *)malloc(
-	    sizeof(*record->object_list) * record->num_object);
-
 	int object_index = 0;
+	record.objects.resize(b->path_to_object.size());
 	for (auto &object_it : b->path_to_object) {
 		struct bcpid_object *object = object_it.second;
-		struct bcpi_object *ro = &record->object_list[object_index];
+		bcpi_object &ro = record.objects[object_index];
 
 		if (!object->node_map.size()) {
 			continue;
@@ -641,40 +638,33 @@ bcpid_save(struct bcpid *b)
 
 		object->tmp_archive_object_index = object_index;
 
-		ro->path = strdup(object->path);
-		ro->function_list = 0;
-		ro->num_function = 0;
-		ro->num_node = object->node_map.size();
-		ro->node_list = (struct bcpi_node *)malloc(
-		    sizeof(*ro->node_list) * ro->num_node);
-		ro->object_index = object_index;
+		ro.path = strdup(object->path);
+		ro.object_index = object_index;
 
 		int node_index = 0;
+		ro.nodes.resize(object->node_map.size());
 		for (auto &node_it : object->node_map) {
 			struct bcpid_pc_node *node = node_it.second;
-			struct bcpi_node *rn = &ro->node_list[node_index];
+			bcpi_node &rn = ro.nodes[node_index];
 
 			node->tmp_archive_node_index = node_index;
 
-			rn->object = ro;
-			rn->node_address = node->value;
-			rn->num_incoming_edge = node->incoming_edge_map.size();
-			rn->edge_list = (struct bcpi_edge *)malloc(
-			    sizeof(*rn->edge_list) * rn->num_incoming_edge);
-			rn->node_index = node_index;
+			rn.object = &ro;
+			rn.node_address = node->value;
+			rn.node_index = node_index;
 
 			for (int i = 0; i < name_index; ++i) {
-				rn->terminal_counters[i] =
+				rn.terminal_counters[i] =
 				    node->end_ctr[index_mapping[i]];
 			}
 
 			int edge_index = 0;
+			rn.edges.resize(node->incoming_edge_map.size());
 			for (auto &edge_it : node->incoming_edge_map) {
 				struct bcpid_pc_edge *edge = &edge_it.second;
-				struct bcpi_edge *re =
-				    &rn->edge_list[edge_index];
+				bcpi_edge &re = rn.edges[edge_index];
 
-				re->to = rn;
+				re.to = &rn;
 				/*
 				 * Temporarily use this field to hold pointer to
 				 * the originating node that is part of daemon
@@ -683,9 +673,9 @@ bcpid_save(struct bcpid *b)
 				 * been allocated yet. Will be corrected during
 				 * second pass.
 				 */
-				re->from = (struct bcpi_node *)edge->from;
+				re.from = (bcpi_node *)edge->from;
 				for (int i = 0; i < name_index; ++i) {
-					re->counters[i] =
+					re.counters[i] =
 					    edge->hits[index_mapping[i]];
 				}
 				++edge_index;
@@ -694,36 +684,34 @@ bcpid_save(struct bcpid *b)
 		}
 		++object_index;
 	}
+	record.objects.resize(object_index);
 
-	for (int i = 0; i < record->num_object; ++i) {
-		struct bcpi_object *ro = &record->object_list[i];
-		for (int j = 0; j < ro->num_node; ++j) {
-			struct bcpi_node *rn = &ro->node_list[j];
-			for (int k = 0; k < rn->num_incoming_edge; ++k) {
-				struct bcpi_edge *re = &rn->edge_list[k];
+	for (auto &ro : record.objects) {
+		for (auto &rn : ro.nodes) {
+			for (auto &re : rn.edges) {
 				/*
 				 * Here we correct this field to point to record
 				 * data structure using indexes that were set up
 				 * during first pass
 				 */
 				struct bcpid_pc_node *node_from =
-				    (struct bcpid_pc_node *)re->from;
+				    (struct bcpid_pc_node *)re.from;
 
 				int from_index_object =
 				    node_from->obj->tmp_archive_object_index;
 				int from_index_node =
 				    node_from->tmp_archive_node_index;
 
-				struct bcpi_object *from_object =
-				    &record->object_list[from_index_object];
-				struct bcpi_node *from_node =
-				    &from_object->node_list[from_index_node];
-				re->from = from_node;
+				bcpi_object &from_object =
+				    record.objects[from_index_object];
+				bcpi_node &from_node =
+				    from_object.nodes[from_index_node];
+				re.from = &from_node;
 			}
 		}
 	}
 
-	struct tm *t = gmtime((time_t *)&record->epoch);
+	struct tm *t = gmtime((time_t *)&record.epoch_end);
 	char time_buffer[128];
 
 	strftime(time_buffer, 127, "%F_%T", t);
@@ -733,22 +721,22 @@ bcpid_save(struct bcpid *b)
 	    time_buffer, uts.nodename);
 	status = bcpi_save_file(record, file_name);
 	if (status) {
-		bcpi_free(record);
+		fprintf(stderr, "File save failed!\n");
 		return;
 	}
 
-	struct bcpi_record *reverse_record;
+#ifdef BCPID_DEBUG
+	{
+		bcpi_record reverse_record;
 
-	status = bcpi_load_file(file_name, &reverse_record);
-	if (status) {
-		bcpi_free(record);
-		return;
+		status = bcpi_load_file(file_name, &reverse_record);
+		if (status) {
+			fprintf(stderr, "File save corrupt!\n");
+			return;
+		}
+		bcpi_is_equal(record, reverse_record);
 	}
-
-	bcpi_is_equal(record, reverse_record);
-
-	bcpi_free(record);
-	bcpi_free(reverse_record);
+#endif
 
 	bcpid_garbage_collect(b);
 

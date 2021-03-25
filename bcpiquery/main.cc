@@ -20,7 +20,6 @@
 #include <iostream>
 #include <string>
 
-#include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
 
 #define DECL_COMMAND(_x)                      \

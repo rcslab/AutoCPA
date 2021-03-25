@@ -14,13 +14,13 @@
 #include <sysexits.h>
 #include <time.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <string>
 
-#include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
 #include "elfutil.h"
 #include "util.h"
@@ -46,7 +46,7 @@ check_file(const std::string &f)
 		return (1);
 	}
 
-	uint32_t hash = bcpi_crc32(buf, filesz);
+	uint32_t hash = crc32(0, (const unsigned char *)buf, filesz);
 
 	if (munmap(buf, filesz) == -1) {
 		perror("munmap");
@@ -65,7 +65,7 @@ void
 check_usage()
 {
 	fprintf(stderr,
-	    "Usage: bcpiquery checksum [OPTIONS]\n"
+	    "Usage: bcpiquery check [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
 	    "\t-f name -- Process file with name\n");

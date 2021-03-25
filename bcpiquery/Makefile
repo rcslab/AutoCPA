@@ -3,15 +3,7 @@ SRCS= main.cc check.cc dump.cc extract.cc functions.cc programs.cc elfutil.cc ut
 
 LDADD= -L../libbcpi -lz -ldwarf -lelf -lbcpi
 
-CXXFLAGS += -std=c++20 -DBCPID_DEBUG -g -Wall
-
-.ifdef WITH_ASAN
-CXXFLAGS += -fsanitize=address
-.endif
-
-.ifdef WITH_UBSAN
-CXXFLAGS += -fsanitize=undefined
-.endif
+bcpiquery: ../libbcpi/libbcpi.a
 
 MAN=
 

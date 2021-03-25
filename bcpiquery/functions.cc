@@ -21,7 +21,6 @@
 #include <set>
 #include <string>
 
-#include "../libbcpi/crc32.h"
 #include "../libbcpi/libbcpi.h"
 #include "elfutil.h"
 #include "util.h"
@@ -66,40 +65,37 @@ struct Sample {
 static void
 util_process(util_query_parameter &u)
 {
-	std::vector<struct bcpi_node *> nodes;
 	std::unordered_map<std::string, Sample> samples;
 	std::set<std::string> all_counters;
 
 	for (auto &f : u.files) {
-		std::vector<struct bcpi_object *> objects;
-		std::vector<std::string> counters;
-
-		struct bcpi_record *record;
+		bcpi_record record;
+		std::vector<bcpi_node *> nodes;
+		std::vector<bcpi_object *> objects;
 
 		if (bcpi_load_file(f.c_str(), &record) < 0) {
 			fprintf(stderr, "Failed to load bcpi file '%s'\n",
 			    f.c_str());
 		}
 
-		counters.resize(record->num_counter);
-		for (int i = 0; i < record->num_counter; i++) {
-			counters[i] = record->counter_name[i];
-			if (!all_counters.contains(counters[i]))
-				all_counters.insert(counters[i]);
+		for (auto &c : record.counters) {
+			if (!all_counters.contains(c))
+				all_counters.insert(c);
 		}
 
 		if (verbose)
 			bcpi_print_summary(record);
 
 		if (u.object_name) {
-			bcpi_collect_object(record, objects, u.object_name);
+			bcpi_collect_object(&record, objects, u.object_name);
 			// here only the objects that we are interested in are
 			// loaded into objects
 			for (auto o : objects) {
-				bcpi_collect_node_from_object(record, nodes, o);
+				bcpi_collect_node_from_object(
+				    &record, nodes, o);
 			}
 		} else {
-			bcpi_collect_node(record, nodes);
+			bcpi_collect_node(&record, nodes);
 		}
 
 		// Examine all nodes in a file
@@ -107,21 +103,16 @@ util_process(util_query_parameter &u)
 			std::string func = lookup_function(
 			    n->object->path, n->node_address);
 
-			for (int c = 0; c < counters.size(); c++) {
+			for (int c = 0; c < record.counters.size(); c++) {
 				uint64_t value = n->terminal_counters[c];
-				samples[func].add(counters[c], value);
+				samples[func].add(record.counters[c], value);
 			}
 
 			if (verbose)
-				bcpi_show_node_info(record, n, u.counter_name);
+				bcpi_show_node_info(&record, n, u.counter_name);
 		}
-
-		flush_objcache();
-		nodes.clear();
-		objects.clear();
-		counters.clear();
-		bcpi_free(record);
 	}
+	flush_objcache();
 
 	if (u.counter_name) {
 		all_counters.clear();
@@ -180,7 +171,7 @@ void
 functions_usage()
 {
 	fprintf(stderr,
-	    "Usage: bcpiquery -c [COUNTER] [OPTIONS]\n"
+	    "Usage: bcpiquery functions -o PROGRAM [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
 	    "\t-n n -- Show top n functions\n"
