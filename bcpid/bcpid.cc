@@ -1302,6 +1302,7 @@ bcpid_setup_pmc(struct bcpid *b)
 	strcat(conf_name, cpu_name);
 	strcat(conf_name, suffix);
 
+	MSG("Reading config %s...", conf_name);
 	FILE *file = fopen(conf_name, "r");
 	if (!file) {
 		return;
