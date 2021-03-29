@@ -18,6 +18,5 @@ mkdir -p "$PROJ"
 
 $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -postScript DWARF_ExtractorScript.java
 
-shift
-shift
+shift 3
 $GHIDRA_HEADLESS "$PROJ" "$SHORT" -process "$SHORT" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$CSV" "$@"
