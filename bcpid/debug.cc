@@ -88,18 +88,24 @@ Debug_Log(int level, const char *fmt, ...)
 	va_list ap;
 	char buf[MAX_LOG];
 	size_t off;
+	size_t console_off;
 
 #if !defined(BCPID_DEBUG)
 	if (level > LEVEL_MSG)
 		return;
 #endif /* DEBUG */
 
+#if defined(BCPID_DEBUG)
 	time_t curTime;
 	time(&curTime);
 	off = strftime(buf, 32, "%Y-%m-%d %H:%M:%S ", localtime(&curTime));
 
 	snprintf(buf + off, MAX_LOG - off, "%d ", pthread_getthreadid_np());
+#else
+	buf[0] = '\0';
+#endif
 	off = strlen(buf);
+	console_off = off;
 
 	switch (level) {
 	case LEVEL_SYS:
@@ -130,14 +136,17 @@ Debug_Log(int level, const char *fmt, ...)
 	vsnprintf(buf + off, MAX_LOG - off, fmt, ap);
 	va_end(ap);
 
+	if (level <= LEVEL_WRN)
+		off = console_off;
+
 	logLock.lock();
 
 	if (!detached) {
 #ifdef BCPID_DEBUG
-		if (level <= LEVEL_MSG)
+		if (level <= LEVEL_LOG)
 			std::cerr << buf;
 #else /* RELEASE or PERF */
-		if (level <= LEVEL_ERR)
+		if (level <= LEVEL_MSG)
 			std::cerr << buf + off;
 #endif
 	}

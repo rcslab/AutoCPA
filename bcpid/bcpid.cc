@@ -34,41 +34,6 @@
 #include "../libbcpi/libbcpi.h"
 #include "debug.h"
 
-/*
- * Set up signal handlers so that the program doesn't get
- * terminated right away and has a chance to handle signals.
- * This is especially useful when taking care of user pressing
- * Ctrl-C on the program
- *
- * @param signal_handler function to call when SIGTERM, SIGINT or
- * SIGHUP is delivered
- */
-
-void
-bcpid_signal_init(void (*signal_handler)(int num))
-{
-	struct sigaction sa;
-	memset(&sa, 0, sizeof(sa));
-
-	sigemptyset(&sa.sa_mask);
-	sigaddset(&sa.sa_mask, SIGTERM);
-	sigaddset(&sa.sa_mask, SIGINT);
-
-	sa.sa_handler = signal_handler;
-	sigaction(SIGTERM, &sa, 0);
-	sigaction(SIGINT, &sa, 0);
-	sigaction(SIGHUP, &sa, 0);
-
-	sa.sa_handler = SIG_IGN;
-	sigaction(SIGPIPE, &sa, 0);
-	sigaction(SIGXCPU, &sa, 0);
-
-	// Currently we don't spawn children, but may as well leave this here
-	sa.sa_handler = SIG_DFL;
-	sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT;
-	sigaction(SIGCHLD, &sa, 0);
-}
-
 // Special kqueue identifier for periodic timer
 #define BCPID_TIMER_MAGIC 0xbcd1d
 
@@ -109,12 +74,13 @@ bcpid_signal_init(void (*signal_handler)(int num))
 #define BCPID_OBJECT_HASH_GC_THRESHOLD 2000
 
 // Default sampling interval
-#define BCPID_DEFAULT_COUNT 16384
+#define BCPID_DEFAULT_COUNT 65536
 
 // Path to kernel object
 #define BCPID_KERNEL_PATH "/boot/kernel/"
 
-typedef void (*bcpid_event_handler)(struct bcpid *b, const struct pmclog_ev *);
+struct bcpid;
+typedef void (*bcpid_event_handler)(bcpid *b, const struct pmclog_ev *);
 
 // Keep track of event received from PMCLOG interface
 struct bcpid_pmclog_event {
@@ -133,18 +99,17 @@ struct bcpid_pmc_cpu {
 struct bcpid_pmc_counter {
 	bool is_valid;
 	uint64_t hits;
-	const char *name;
+	std::string name;
+	int sample_rate;
 };
 
 // Represent a distinct object file (executable or dynamic library)
 struct bcpid_object {
-	const char *path;
+	std::string path;
 	struct timespec last_modified;
 	bcpi_hash hash;
 
-	// This has to be a map, because its ordinality is exploited
-	// during compression
-	std::map<uint64_t, struct bcpid_pc_node *> node_map;
+	std::unordered_map<uint64_t, struct bcpid_pc_node *> node_map;
 
 	// Used during compression
 	int tmp_archive_object_index;
@@ -157,7 +122,7 @@ struct bcpid_program_mapping {
 	// offset of this section in the corresponding ELF file
 	uint64_t file_offset;
 	uint32_t protection;
-	struct bcpid_object *obj;
+	bcpid_object *obj;
 };
 
 // A routine to sort mappings according to their beginning address
@@ -173,7 +138,7 @@ bcpid_program_mapping_sort(const struct bcpid_program_mapping &me,
 // Represent a distinct process
 struct bcpid_program {
 	int pid;
-	std::vector<struct bcpid_program_mapping> mappings;
+	std::vector<bcpid_program_mapping> mappings;
 };
 
 struct bcpid_pc_node;
@@ -181,31 +146,24 @@ struct bcpid_pc_node;
 // An edge in a call chain graph
 struct bcpid_pc_edge {
 	uint64_t hits[BCPI_MAX_NUM_COUNTER];
-	struct bcpid_pc_node *from;
-	struct bcpid_pc_node *to;
+	bcpid_pc_node *from;
+	bcpid_pc_node *to;
 };
 
 // A vertex in a call chain graph
 struct bcpid_pc_node {
 	uint64_t value;
 	uint64_t flag;
-	struct bcpid_object *obj;
+	bcpid_object *obj;
 	uint64_t end_ctr[BCPI_MAX_NUM_COUNTER];
 
 	// Map downstream node to the edge between nodes, where
 	// counter numbers are actually stored
-	std::unordered_map<struct bcpid_pc_node *, struct bcpid_pc_edge>
-	    incoming_edge_map;
+	std::unordered_map<bcpid_pc_node *, bcpid_pc_edge> incoming_edge_map;
 
 	// Used during compression
 	int tmp_archive_node_index;
 };
-
-extern const char *g_bcpid_pmclog_name[];
-extern const char *g_bcpid_pmclog_state_name[];
-extern const char *g_bcpid_debug_counter_name[];
-
-int g_quit;
 
 // various debug counters
 enum bcpid_debug_counter {
@@ -243,8 +201,13 @@ struct bcpid_hash_cache {
 	bcpi_hash hash;
 };
 
-static bool foreground = false;
-static int verbose = 0;
+struct bcpid_statistics {
+	int num_object;
+	int num_program;
+	int num_node;
+	int num_edge;
+	int num_object_hash;
+};
 
 struct bcpid {
 	int num_pmclog_event;
@@ -257,6 +220,7 @@ struct bcpid {
 	int pipefd[2];
 	int non_block_pipefd[2];
 	int kqueue_fd;
+	int g_quit;
 
 	pthread_t pmclog_forward_thr;
 
@@ -268,23 +232,23 @@ struct bcpid {
 
 	uint64_t debug_counter[bcpid_debug_counter_max];
 
-	struct bcpid_pmc_counter pmc_ctrs[BCPI_MAX_NUM_COUNTER];
-	struct bcpid_pmc_cpu pmc_cpus[BCPID_MAX_CPU];
-	struct bcpid_pmclog_event pmclog_events[BCPID_MAX_NUM_PMCLOG_EVENTS];
+	bcpid_pmc_counter pmc_ctrs[BCPI_MAX_NUM_COUNTER];
+	bcpid_pmc_cpu pmc_cpus[BCPID_MAX_CPU];
+	bcpid_pmclog_event pmclog_events[BCPID_MAX_NUM_PMCLOG_EVENTS];
 
 	int kevent_in_size;
 	int kevent_out_size;
 	struct kevent kevent_in_batch[BCPID_KEVENT_MAX_BATCH_SIZE];
 	struct kevent kevent_out_batch[BCPID_KEVENT_MAX_BATCH_SIZE];
 
-	std::unordered_map<pmc_id_t, struct bcpid_pmc_counter *>
-	    pmcid_to_counter;
-	std::unordered_map<int, struct bcpid_program *> pid_to_program;
-	std::unordered_map<std::string, struct bcpid_object *> path_to_object;
+	std::unordered_map<pmc_id_t, bcpid_pmc_counter *> pmcid_to_counter;
+	std::unordered_map<int, bcpid_program *> pid_to_program;
+	std::unordered_map<std::string, bcpid_object *> path_to_object;
 
+	std::string config_file;
 	int default_count;
-	const char *default_pmc;
-	const char *default_output_dir;
+	std::string default_pmc;
+	std::string default_output_dir;
 	bool pmc_override;
 
 	std::vector<bcpid_kernel_object> kernel_objects;
@@ -301,8 +265,35 @@ struct bcpid {
 	int object_hash_collect_threshold;
 };
 
-void
-bcpid_debug_counter_increment(struct bcpid *b, enum bcpid_debug_counter ctr)
+static bool foreground = false;
+static int verbose = 0;
+
+static const char *g_bcpid_pmclog_name[] = { "PMCLOG_TYPE_PADDING",
+	"PMCLOG_TYPE_CLOSEMSG", "PMCLOG_TYPE_DROPNOTIFY",
+	"PMCLOG_TYPE_INITIALIZE", "PMCLOG_TYPE_PADDING",
+	"PMCLOG_TYPE_PMCALLOCATE", "PMCLOG_TYPE_PMCATTACH",
+	"PMCLOG_TYPE_PMCDETACH", "PMCLOG_TYPE_PROCCSW", "PMCLOG_TYPE_PROCEXEC",
+	"PMCLOG_TYPE_PROCEXIT", "PMCLOG_TYPE_PROCFORK", "PMCLOG_TYPE_SYSEXIT",
+	"PMCLOG_TYPE_USERDATA", "PMCLOG_TYPE_MAP_IN", "PMCLOG_TYPE_MAP_OUT",
+	"PMCLOG_TYPE_CALLCHAIN", "PMCLOG_TYPE_PMCALLOCATEDYN",
+	"PMCLOG_TYPE_THR_CREATE", "PMCLOG_TYPE_THR_EXIT",
+	"PMCLOG_TYPE_PROC_CREATE", nullptr };
+
+static const char *g_bcpid_pmclog_state_name[] = { "PMCLOG_OK", "PMCLOG_EOF",
+	"PMCLOG_REQUIRE_DATA", "PMCLOG_ERROR", nullptr };
+
+static const char *g_bcpid_debug_counter_name[] = {
+	"bcpid_debug_empty_mapin_name", "bcpid_debug_empty_mapping_pc",
+	"bcpid_debug_pc_before_mapping", "bcpid_debug_pc_after_mapping",
+	"bcpid_debug_getprocs_fail", "bcpid_debug_getvmmap_fail",
+	"bcpid_debug_callchain_self_fire",
+	"bcpid_debug_callchain_proc_init_fail",
+	"bcpid_debug_callchain_counter_gone", "bcpid_debug_callchain_pc_skip",
+	"bcpid_debug_counter_max", nullptr
+};
+
+static void
+bcpid_debug_counter_increment(bcpid *b, enum bcpid_debug_counter ctr)
 {
 	++b->debug_counter[ctr];
 }
@@ -311,15 +302,15 @@ bcpid_debug_counter_increment(struct bcpid *b, enum bcpid_debug_counter ctr)
  * Initialize an object.
  * Main objective is to calculate its hash
  */
-void
-bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
+static void
+bcpid_object_init(bcpid *b, bcpid_object *obj, const std::string &path)
 {
-	obj->path = strdup(path);
+	obj->path = path;
 	obj->hash = 0;
 	memset(&obj->last_modified, 0, sizeof(obj->last_modified));
 
 	struct stat s;
-	int status = stat(path, &s);
+	int status = stat(path.c_str(), &s);
 	if (status == -1) {
 		if (errno != ENOENT) {
 			PERROR("stat");
@@ -339,7 +330,8 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 		}
 	}
 
-	int file_fd = open(path, O_RDONLY | O_CLOEXEC);
+#ifdef BCPID_HASH_OBJECTS
+	int file_fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
 	if (file_fd == -1) {
 		if (errno != ENOENT && errno != EPERM && errno != EACCES) {
 			PERROR("open");
@@ -370,14 +362,16 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 	}
 
 	obj->hash = hash;
+#endif
+
 	if (oit == b->object_hash_cache.end()) {
 		bcpid_hash_cache cache;
 		cache.last_modified = s.st_mtim;
-		cache.hash = hash;
+		cache.hash = obj->hash;
 
 		b->object_hash_cache.emplace(std::string(path), cache);
 	} else {
-		oit->second.hash = hash;
+		oit->second.hash = obj->hash;
 		oit->second.last_modified = s.st_mtim;
 	}
 }
@@ -395,7 +389,7 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const char *path)
 void *
 bcpid_pmglog_thread_main(void *arg)
 {
-	struct bcpid *b = (struct bcpid *)arg;
+	bcpid *b = (bcpid *)arg;
 
 	int pmclog_fd = b->pipefd[0];
 	int non_block_pmclog_fd = b->non_block_pipefd[1];
@@ -428,24 +422,24 @@ bcpid_pmglog_thread_main(void *arg)
  * Print diagnostic information at program
  * termination
  */
-void
-bcpid_report_pmc_ctr(struct bcpid *b)
+static void
+bcpid_report_pmc_ctr(bcpid *b)
 {
 	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
 		if (!b->pmc_ctrs[i].is_valid) {
 			continue;
 		}
 
-		struct bcpid_pmc_counter *spec = &b->pmc_ctrs[i];
-		MSG("%s: %ld", spec->name, spec->hits);
+		bcpid_pmc_counter *spec = &b->pmc_ctrs[i];
+		MSG("%s: %ld", spec->name.c_str(), spec->hits);
 	}
 }
 
 /*
  * Initialize object after receives MAP_IN event from PMCLOG
  */
-void
-bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_mapin(bcpid *b, const struct pmclog_ev *ev)
 {
 	const struct pmclog_ev_map_in *mi = &ev->pl_u.pl_mi;
 	pid_t pid = mi->pl_pid;
@@ -473,8 +467,8 @@ bcpid_event_handler_mapin(struct bcpid *b, const struct pmclog_ev *ev)
 	b->kernel_objects.push_back(ko);
 }
 
-void
-bcpid_event_handler_mapout(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_mapout(bcpid *b, const struct pmclog_ev *ev)
 {
 	const struct pmclog_ev_map_out *mo = &ev->pl_u.pl_mo;
 	pid_t pid = mo->pl_pid;
@@ -487,14 +481,14 @@ bcpid_event_handler_mapout(struct bcpid *b, const struct pmclog_ev *ev)
  * objects are reported only once by PMCLOG, we need to re-establish
  * them from caches.
  */
-void
-bcpid_replay_kernel_objects(struct bcpid *b)
+static void
+bcpid_replay_kernel_objects(bcpid *b)
 {
 	int pid = -1;
-	struct bcpid_program *proc;
+	bcpid_program *proc;
 	auto pit = b->pid_to_program.find(pid);
 	if (pit == b->pid_to_program.end()) {
-		proc = new struct bcpid_program;
+		proc = new bcpid_program;
 		proc->pid = pid;
 		b->pid_to_program.emplace(pid, proc);
 	} else {
@@ -503,16 +497,16 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 
 	for (const bcpid_kernel_object &ko : b->kernel_objects) {
 		auto oit = b->path_to_object.find(ko.path);
-		struct bcpid_object *obj;
+		bcpid_object *obj;
 		if (oit == b->path_to_object.end()) {
-			obj = new struct bcpid_object;
-			bcpid_object_init(b, obj, ko.path.c_str());
+			obj = new bcpid_object;
+			bcpid_object_init(b, obj, ko.path);
 			b->path_to_object.emplace(ko.path, obj);
 		} else {
 			obj = oit->second;
 		}
 
-		struct bcpid_program_mapping m;
+		bcpid_program_mapping m;
 		m.start = ko.start;
 		m.file_offset = 0;
 		m.protection = 0;
@@ -528,8 +522,8 @@ bcpid_replay_kernel_objects(struct bcpid *b)
 /*
  * Remove all in-memory sample data and tracking data
  */
-void
-bcpid_garbage_collect(struct bcpid *b)
+static void
+bcpid_garbage_collect(bcpid *b)
 {
 	for (auto p : b->path_to_object) {
 		bcpid_object *o = p.second;
@@ -537,7 +531,6 @@ bcpid_garbage_collect(struct bcpid *b)
 			bcpid_pc_node *n = np.second;
 			delete n;
 		}
-		free((void *)o->path);
 		delete o;
 	}
 
@@ -556,12 +549,12 @@ bcpid_garbage_collect(struct bcpid *b)
 }
 
 // Calculate number of active counters
-int
-bcpid_num_active_counter(struct bcpid *b)
+static int
+bcpid_num_active_counter(bcpid *b)
 {
 	int num_counter = 0;
 	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
+		bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
 		if (!ctr->is_valid) {
 			continue;
 		}
@@ -571,15 +564,13 @@ bcpid_num_active_counter(struct bcpid *b)
 	return num_counter;
 }
 
-void bcpid_stop_all(struct bcpid *);
-
 /*
  * Save sample data on disk. All in-memory data
  * are obliterated
  */
 
-void
-bcpid_save(struct bcpid *b)
+static void
+bcpid_save(bcpid *b)
 {
 	bcpi_record record;
 
@@ -605,7 +596,7 @@ bcpid_save(struct bcpid *b)
 	int name_index = 0;
 	int index_mapping[BCPI_MAX_NUM_COUNTER];
 	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
+		bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
 		if (!ctr->is_valid) {
 			continue;
 		}
@@ -617,7 +608,7 @@ bcpid_save(struct bcpid *b)
 
 	int num_object = 0;
 	for (auto &object_it : b->path_to_object) {
-		struct bcpid_object *object = object_it.second;
+		bcpid_object *object = object_it.second;
 
 		if (!object->node_map.size()) {
 			continue;
@@ -629,7 +620,7 @@ bcpid_save(struct bcpid *b)
 	int object_index = 0;
 	record.objects.resize(b->path_to_object.size());
 	for (auto &object_it : b->path_to_object) {
-		struct bcpid_object *object = object_it.second;
+		bcpid_object *object = object_it.second;
 		bcpi_object &ro = record.objects[object_index];
 
 		if (!object->node_map.size()) {
@@ -638,13 +629,13 @@ bcpid_save(struct bcpid *b)
 
 		object->tmp_archive_object_index = object_index;
 
-		ro.path = strdup(object->path);
+		ro.path = object->path;
 		ro.object_index = object_index;
 
 		int node_index = 0;
 		ro.nodes.resize(object->node_map.size());
 		for (auto &node_it : object->node_map) {
-			struct bcpid_pc_node *node = node_it.second;
+			bcpid_pc_node *node = node_it.second;
 			bcpi_node &rn = ro.nodes[node_index];
 
 			node->tmp_archive_node_index = node_index;
@@ -661,7 +652,7 @@ bcpid_save(struct bcpid *b)
 			int edge_index = 0;
 			rn.edges.resize(node->incoming_edge_map.size());
 			for (auto &edge_it : node->incoming_edge_map) {
-				struct bcpid_pc_edge *edge = &edge_it.second;
+				bcpid_pc_edge *edge = &edge_it.second;
 				bcpi_edge &re = rn.edges[edge_index];
 
 				re.to = &rn;
@@ -694,8 +685,8 @@ bcpid_save(struct bcpid *b)
 				 * data structure using indexes that were set up
 				 * during first pass
 				 */
-				struct bcpid_pc_node *node_from =
-				    (struct bcpid_pc_node *)re.from;
+				bcpid_pc_node *node_from = (bcpid_pc_node *)
+							       re.from;
 
 				int from_index_object =
 				    node_from->obj->tmp_archive_object_index;
@@ -717,11 +708,11 @@ bcpid_save(struct bcpid *b)
 	strftime(time_buffer, 127, "%F_%T", t);
 
 	char file_name[256];
-	snprintf(file_name, 255, "%s/bcpi_%s_%s.bin", b->default_output_dir,
-	    time_buffer, uts.nodename);
+	snprintf(file_name, 255, "%s/bcpi_%s_%s.bin",
+	    b->default_output_dir.c_str(), time_buffer, uts.nodename);
 	status = bcpi_save_file(record, file_name);
 	if (status) {
-		fprintf(stderr, "File save failed!\n");
+		SYSERROR("File save failed!");
 		return;
 	}
 
@@ -731,7 +722,7 @@ bcpid_save(struct bcpid *b)
 
 		status = bcpi_load_file(file_name, &reverse_record);
 		if (status) {
-			fprintf(stderr, "File save corrupt!\n");
+			SYSERROR("File save corrupt!");
 			return;
 		}
 		bcpi_is_equal(record, reverse_record);
@@ -743,22 +734,13 @@ bcpid_save(struct bcpid *b)
 	MSG("saved at %s", file_name);
 }
 
-void
-bcpid_program_mapping_dump(const std::vector<bcpid_program_mapping> &mappings)
-{
-	for (const bcpid_program_mapping &m : mappings) {
-		fprintf(stderr, "%lx, %lx, %lx, %x\n", m.start, m.end,
-		    m.file_offset, m.protection);
-	}
-}
-
 /*
  * Obtain pointer to the node, given a program counter and a process.
  * This routine first finds the object that is mapped at that address,
  * it then retreives the node, and creates one if necessary.
  */
-struct bcpid_pc_node *
-bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc, uint64_t pc)
+static bcpid_pc_node *
+bcpid_get_node_from_pc(bcpid *b, bcpid_program *proc, uint64_t pc)
 {
 	// Until there is a better way to distinguish kernel address,
 	// this is currently used. Note that '-1' is PMCLOG's way of
@@ -767,7 +749,7 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc, uint64_t pc)
 		proc = b->pid_to_program[-1];
 	}
 
-	struct bcpid_program_mapping m = { pc, 0, 0, 0, 0 };
+	bcpid_program_mapping m = { pc, 0, 0, 0, 0 };
 	// Upper bound performs binary search. It is assumed that
 	// there is no overlap in address spaces.
 	auto it = upper_bound(proc->mappings.begin(), proc->mappings.end(), m,
@@ -776,33 +758,33 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc, uint64_t pc)
 		if (!proc->mappings.size()) {
 			bcpid_debug_counter_increment(
 			    b, bcpid_debug_empty_mapping_pc);
-			return 0;
+			return nullptr;
 		}
 	}
 	if (it != proc->mappings.begin()) {
 		--it;
 	}
 
-	struct bcpid_program_mapping *mapping = &*it;
+	bcpid_program_mapping *mapping = &*it;
 	if (pc < mapping->start) {
 		bcpid_debug_counter_increment(b, bcpid_debug_pc_before_mapping);
-		return 0;
+		return nullptr;
 	}
 
 	if (pc > mapping->end && proc->pid != -1) {
 		bcpid_debug_counter_increment(b, bcpid_debug_pc_after_mapping);
-		return 0;
+		return nullptr;
 	}
 
-	struct bcpid_object *obj = mapping->obj;
-	struct bcpid_pc_node *node;
+	bcpid_object *obj = mapping->obj;
+	bcpid_pc_node *node;
 	// Turn raw program counter into an address that can be located
 	// in an ELF file.
 	uint64_t real_addr = pc - mapping->start + mapping->file_offset;
 	auto nit = obj->node_map.find(real_addr);
 	if (nit == obj->node_map.end()) {
 		b->num_node++;
-		node = new struct bcpid_pc_node;
+		node = new bcpid_pc_node();
 		memset(node->end_ctr, 0, sizeof(node->end_ctr));
 		node->value = real_addr;
 		node->obj = obj;
@@ -820,26 +802,44 @@ bcpid_get_node_from_pc(struct bcpid *b, struct bcpid_program *proc, uint64_t pc)
  * Main objective is to read address space mappings and to create
  * index for them using procstat API.
  */
-struct bcpid_program *
-bcpid_init_proc(struct bcpid *b, int pid)
+static bcpid_program *
+bcpid_init_proc(bcpid *b, int pid)
 {
 	uint32_t count;
+	bcpid_program *exec;
 	struct kinfo_proc *kproc = procstat_getprocs(
 	    b->procstat, KERN_PROC_PID, pid, &count);
 	if (!count || !kproc) {
 		bcpid_debug_counter_increment(b, bcpid_debug_getprocs_fail);
-		return 0;
+		return nullptr;
+	}
+
+	if (kproc->ki_flag & P_SYSTEM) {
+		/*
+		 * Make a fake process for Kernel processes so we don't waste
+		 * time calling procstat.
+		 */
+
+		exec = new bcpid_program();
+		exec->pid = pid;
+
+		procstat_freeprocs(b->procstat, kproc);
+		return exec;
 	}
 
 	struct kinfo_vmentry *vm = procstat_getvmmap(
 	    b->procstat, kproc, &count);
 	if (!count || !vm) {
+		/*
+		 * XXX: We could use the image name, track mmap/munmap, and our
+		 * cache to solve the racey samples where programs exited.
+		 */
 		bcpid_debug_counter_increment(b, bcpid_debug_getvmmap_fail);
 		procstat_freeprocs(b->procstat, kproc);
-		return 0;
+		return nullptr;
 	}
 
-	struct bcpid_program *exec = new struct bcpid_program;
+	exec = new bcpid_program();
 	exec->pid = pid;
 
 	struct kinfo_vmentry *cur_vm = vm;
@@ -850,16 +850,16 @@ bcpid_init_proc(struct bcpid *b, int pid)
 
 		std::string path(cur_vm->kve_path);
 		auto oit = b->path_to_object.find(path);
-		struct bcpid_object *obj;
+		bcpid_object *obj;
 		if (oit == b->path_to_object.end()) {
-			obj = new struct bcpid_object;
+			obj = new bcpid_object();
 			bcpid_object_init(b, obj, cur_vm->kve_path);
 			b->path_to_object.emplace(path, obj);
 		} else {
 			obj = oit->second;
 		}
 
-		struct bcpid_program_mapping m;
+		bcpid_program_mapping m;
 		m.start = cur_vm->kve_start;
 		m.end = cur_vm->kve_end;
 		m.file_offset = cur_vm->kve_offset;
@@ -880,8 +880,8 @@ bcpid_init_proc(struct bcpid *b, int pid)
 }
 
 // Get counter index using pointer arithmetic.
-int
-bcpid_get_pmc_counter_index(struct bcpid *b, struct bcpid_pmc_counter *c)
+static int
+bcpid_get_pmc_counter_index(bcpid *b, bcpid_pmc_counter *c)
 {
 	return c - b->pmc_ctrs;
 }
@@ -891,8 +891,8 @@ bcpid_get_pmc_counter_index(struct bcpid *b, struct bcpid_pmc_counter *c)
  * is to walk the entire call chain, possibly creating vertices and
  * edges in the meantime, and increment counters along the way.
  */
-void
-bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_callchain(bcpid *b, const struct pmclog_ev *ev)
 {
 	if (!b->first_callchain) {
 		bcpid_replay_kernel_objects(b);
@@ -908,7 +908,7 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 		return;
 	}
 
-	struct bcpid_program *proc;
+	bcpid_program *proc;
 	auto it = b->pid_to_program.find(pid);
 	if (it == b->pid_to_program.end()) {
 		proc = bcpid_init_proc(b, pid);
@@ -922,7 +922,7 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 		proc = it->second;
 	}
 
-	struct bcpid_pmc_counter *spec;
+	bcpid_pmc_counter *spec;
 	auto sit = b->pmcid_to_counter.find(cc->pl_pmcid);
 	if (sit == b->pmcid_to_counter.end()) {
 		bcpid_debug_counter_increment(
@@ -936,8 +936,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 	int spec_index = bcpid_get_pmc_counter_index(b, spec);
 
 	int chain_len = cc->pl_npc;
-	struct bcpid_pc_node *to_node;
-	struct bcpid_pc_node *from_node;
+	bcpid_pc_node *to_node;
+	bcpid_pc_node *from_node;
 
 	for (int i = 1; i < chain_len; ++i) {
 		uint64_t to_pc = cc->pl_pc[i - 1];
@@ -962,7 +962,7 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
 
 		auto *map = &to_node->incoming_edge_map;
 		auto eit = map->find(from_node);
-		struct bcpid_pc_edge *e;
+		bcpid_pc_edge *e;
 		if (eit == map->end()) {
 			bcpid_pc_edge edge;
 			memset(edge.hits, 0, sizeof(edge.hits));
@@ -984,8 +984,8 @@ bcpid_event_handler_callchain(struct bcpid *b, const struct pmclog_ev *ev)
  * Handle process exec event from PMCLOG. Main objective is to
  * initialize process data structure for tracking.
  */
-void
-bcpid_event_handler_proc_exec(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_proc_exec(bcpid *b, const struct pmclog_ev *ev)
 {
 	const struct pmclog_ev_procexec *pe = &ev->pl_u.pl_x;
 	const char *main_object_path = pe->pl_pathname;
@@ -1015,21 +1015,21 @@ bcpid_event_handler_proc_exec(struct bcpid *b, const struct pmclog_ev *ev)
 	}
 }
 
-void
-bcpid_event_handler_proc_fork(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_proc_fork(bcpid *b, const struct pmclog_ev *ev)
 {
 }
 
-void
-bcpid_event_handler_proc_create(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_proc_create(bcpid *b, const struct pmclog_ev *ev)
 {
 }
 
 /*
  * Handle process exit.
  */
-void
-bcpid_event_handler_sysexit(struct bcpid *b, const struct pmclog_ev *ev)
+static void
+bcpid_event_handler_sysexit(bcpid *b, const struct pmclog_ev *ev)
 {
 	const struct pmclog_ev_sysexit *ex = &ev->pl_u.pl_se;
 
@@ -1038,25 +1038,25 @@ bcpid_event_handler_sysexit(struct bcpid *b, const struct pmclog_ev *ev)
 		return;
 	}
 
-	struct bcpid_program *prog = pit->second;
+	bcpid_program *prog = pit->second;
 
 	b->pid_to_program.erase(pit);
 	delete prog;
 }
 
-void
-bcpid_register_handlers(struct bcpid *b)
+static void
+bcpid_register_handlers(bcpid *b)
 {
 	int n = 0;
 	for (const char **name = g_bcpid_pmclog_name; *name; ++name, ++n) {
-		struct bcpid_pmclog_event *ev = &b->pmclog_events[n];
+		bcpid_pmclog_event *ev = &b->pmclog_events[n];
 		ev->is_valid = true;
 		ev->name = *name;
 	}
 
 	b->num_pmclog_event = n;
 
-	struct bcpid_pmclog_event *ev;
+	bcpid_pmclog_event *ev;
 	ev = &b->pmclog_events[PMCLOG_TYPE_MAP_IN];
 	ev->handler = bcpid_event_handler_mapin;
 
@@ -1083,8 +1083,8 @@ bcpid_register_handlers(struct bcpid *b)
  * A wrapper to batch kqueue event updates and to reduce number of calls to
  * kqueue
  */
-void
-bcpid_kevent_set(struct bcpid *b, uintptr_t ident, short filter, u_short flags,
+static void
+bcpid_kevent_set(bcpid *b, uintptr_t ident, short filter, u_short flags,
     u_int fflags, int64_t data, void *udata)
 {
 	int cur_size = b->kevent_in_size;
@@ -1094,8 +1094,8 @@ bcpid_kevent_set(struct bcpid *b, uintptr_t ident, short filter, u_short flags,
 	b->kevent_in_size++;
 }
 
-void
-bcpid_pmc_init(struct bcpid *b)
+static void
+bcpid_pmc_init(bcpid *b)
 {
 	int status;
 
@@ -1106,16 +1106,48 @@ bcpid_pmc_init(struct bcpid *b)
 	}
 }
 
+static std::vector<std::string>
+string_split(const std::string &str, const std::string &delim)
+{
+	size_t last = 0;
+	size_t next;
+	std::vector<std::string> retval;
+
+	while ((next = str.find(delim, last)) != std::string::npos) {
+		retval.push_back(str.substr(last, next - last));
+		last = next + delim.length();
+	}
+
+	retval.push_back(str.substr(last, -1));
+
+	return retval;
+}
+
+static std::string
+string_join(const std::vector<std::string> &vstr, const std::string &delim)
+{
+	std::string str = "";
+
+	for (auto &c : vstr) {
+		if (str.length() != 0)
+			str += delim;
+		str += c;
+	}
+
+	return str;
+}
+
 /*
  * Allocate a PMC counter on all CPUs.
  */
-void
-bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
+static void
+bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 {
-	struct bcpid_pmc_counter *ctr = 0;
+	bcpid_pmc_counter *ctr = nullptr;
 	int counter_index = 0;
+
 	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *c = &b->pmc_ctrs[i];
+		bcpid_pmc_counter *c = &b->pmc_ctrs[i];
 		if (c->is_valid) {
 			continue;
 		}
@@ -1126,17 +1158,31 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 	}
 
 	if (!ctr) {
-		MSG("cannot add %s: all %d pmcs allocated", name,
+		MSG("cannot add %s: all %d pmcs allocated", name.c_str(),
 		    BCPI_MAX_NUM_COUNTER);
 		return;
 	}
-	MSG("allocating %s", name);
+	MSG("allocating %s", name.c_str());
+
+	ctr->hits = 0;
+	ctr->sample_rate = (count == -1) ? b->default_count : count;
+
+	auto vname = string_split(name, ",");
+	for (auto p = vname.begin(); p != vname.end(); p++) {
+		size_t val = p->find("=") + 1;
+		if ((*p).starts_with("sample_rate=")) {
+			ctr->sample_rate = std::stoll(p->substr(val));
+			vname.erase(p--);
+		}
+	}
+
+	ctr->name = string_join(vname, ",");
 
 	for (int i = 0; i < b->num_cpu; ++i) {
-		struct bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
+		bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
 		pmc_id_t pmc_id;
-		int status = pmc_allocate(
-		    name, PMC_MODE_SS, PMC_F_CALLCHAIN, i, &pmc_id, count);
+		int status = pmc_allocate(ctr->name.c_str(), PMC_MODE_SS,
+		    PMC_F_CALLCHAIN, i, &pmc_id, ctr->sample_rate);
 		if (status < 0) {
 			PERROR("pmc_allocate");
 			goto fail;
@@ -1153,8 +1199,6 @@ bcpid_alloc_pmc(struct bcpid *b, const char *name, int count)
 	}
 
 	ctr->is_valid = true;
-	ctr->name = strdup(name);
-	ctr->hits = 0;
 fail:
 	return;
 }
@@ -1162,17 +1206,18 @@ fail:
 /*
  * Release an allocated PMC counter on all CPUs.
  */
-void
-bcpid_release_pmc(struct bcpid *b, const char *name, bool invalidate)
+static void
+bcpid_release_pmc(bcpid *b, const std::string &name)
 {
-	struct bcpid_pmc_counter *ctr = 0;
+	bcpid_pmc_counter *ctr = nullptr;
 	int counter_index = 0;
+
 	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *c = &b->pmc_ctrs[i];
+		bcpid_pmc_counter *c = &b->pmc_ctrs[i];
 		if (!c->is_valid) {
 			continue;
 		}
-		if (strcmp(c->name, name)) {
+		if (c->name != name) {
 			continue;
 		}
 		ctr = c;
@@ -1181,14 +1226,14 @@ bcpid_release_pmc(struct bcpid *b, const char *name, bool invalidate)
 	}
 
 	if (!ctr) {
-		MSG("cannot release %s: does not exist", name);
+		MSG("cannot release %s: does not exist", name.c_str());
 		return;
 	}
 
-	MSG("releasing %s", name);
+	MSG("releasing %s", name.c_str());
 
 	for (int i = 0; i < b->num_cpu; ++i) {
-		struct bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
+		bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
 		pmc_id_t pmc_id = cpu->pmcs[counter_index];
 		int status = pmc_stop(pmc_id);
 		if (status < 0) {
@@ -1203,19 +1248,78 @@ bcpid_release_pmc(struct bcpid *b, const char *name, bool invalidate)
 		cpu->pmcs[counter_index] = 0;
 
 		auto it = b->pmcid_to_counter.find(pmc_id);
-		b->pmcid_to_counter.erase(it);
+		if (it != b->pmcid_to_counter.end()) {
+			b->pmcid_to_counter.erase(it);
+		}
 	}
 
-	if (invalidate) {
-		ctr->is_valid = false;
-		ctr->hits = 0;
-		free((void *)ctr->name);
-		ctr->name = 0;
-	}
+	ctr->is_valid = false;
+	ctr->hits = 0;
+	ctr->name = "*invalid*";
 }
 
 void
-bcpid_setup_pmc(struct bcpid *b)
+bcpid_release_all(bcpid *b)
+{
+	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
+		bcpid_pmc_counter *c = &b->pmc_ctrs[i];
+		if (c->is_valid)
+			bcpid_release_pmc(b, c->name);
+	}
+}
+
+static int
+bcpid_parse_config(bcpid *b)
+{
+	int status;
+	const struct pmc_cpuinfo *cpuinfo;
+
+	status = pmc_cpuinfo(&cpuinfo);
+	if (status < 0) {
+		PERROR("pmc_cpuinfo");
+	}
+
+	// Read name of counters from configuration file named by CPU type
+	// by default
+	const char *cpu_name = pmc_name_of_cputype(cpuinfo->pm_cputype);
+	const char *suffix = ".conf";
+	char conf_name[128];
+
+	strcpy(conf_name, "conf/");
+	strcat(conf_name, cpu_name);
+	strcat(conf_name, suffix);
+
+	MSG("Reading config %s...", conf_name);
+	FILE *file = fopen(conf_name, "r");
+	if (!file) {
+		SYSERROR("Could not open configuration file '%s'", conf_name);
+		exit(EX_NOINPUT);
+	}
+
+	for (;;) {
+		char ctr[128];
+		char *s = fgets(ctr, 127, file);
+		if (!s) {
+			break;
+		}
+		ctr[strcspn(ctr, "\r\n")] = 0;
+
+		if (ctr[0] == '#')
+			continue;
+
+		bcpid_alloc_pmc(b, ctr);
+	}
+
+	if (bcpid_num_active_counter(b) == 0) {
+		SYSERROR("No active counters!");
+		exit(EX_CONFIG);
+	}
+
+	return 0;
+}
+
+static void
+bcpid_setup_pmc(bcpid *b)
 {
 	int status;
 	b->num_cpu = pmc_ncpu();
@@ -1266,6 +1370,10 @@ bcpid_setup_pmc(struct bcpid *b)
 	bcpid_kevent_set(b, STDIN_FILENO, EVFILT_READ, EV_ADD, 0, 0, 0);
 	bcpid_kevent_set(
 	    b, BCPID_TIMER_MAGIC, EVFILT_TIMER, EV_ADD, 0, BCPID_INTERVAL, 0);
+	bcpid_kevent_set(b, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, 0);
+	bcpid_kevent_set(b, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, 0);
+	bcpid_kevent_set(b, SIGHUP, EVFILT_SIGNAL, EV_ADD, 0, 0, 0);
+	bcpid_kevent_set(b, SIGINFO, EVFILT_SIGNAL, EV_ADD, 0, 0, 0);
 
 	status = pthread_create(
 	    &b->pmclog_forward_thr, 0, bcpid_pmglog_thread_main, b);
@@ -1275,48 +1383,15 @@ bcpid_setup_pmc(struct bcpid *b)
 
 	// Read name of counters from argv, if present
 	if (b->pmc_override) {
-		char *pmc_name_cpy = strdup(b->default_pmc);
-		const char *delim = ", ";
-		const char *pmc_name = strtok(pmc_name_cpy, delim);
-		while (pmc_name) {
-			bcpid_alloc_pmc(b, pmc_name, b->default_count);
-			pmc_name = strtok(0, delim);
+		std::vector<std::string> pmcs = string_split(
+		    b->default_pmc, ";");
+		for (auto &p : pmcs) {
+			bcpid_alloc_pmc(b, p);
 		}
-		free(pmc_name_cpy);
 		return;
 	}
 
-	const struct pmc_cpuinfo *cpuinfo;
-	status = pmc_cpuinfo(&cpuinfo);
-	if (status < 0) {
-		PERROR("pmc_cpuinfo");
-	}
-
-	// Read name of counters from configuration file named by CPU type
-	// by default
-	const char *cpu_name = pmc_name_of_cputype(cpuinfo->pm_cputype);
-	const char *suffix = ".conf";
-	char conf_name[128];
-
-	strcpy(conf_name, "conf/");
-	strcat(conf_name, cpu_name);
-	strcat(conf_name, suffix);
-
-	MSG("Reading config %s...", conf_name);
-	FILE *file = fopen(conf_name, "r");
-	if (!file) {
-		return;
-	}
-
-	for (;;) {
-		char ctr[128];
-		char *s = fgets(ctr, 127, file);
-		if (!s) {
-			break;
-		}
-		ctr[strcspn(ctr, "\r\n")] = 0;
-		bcpid_alloc_pmc(b, ctr, b->default_count);
-	}
+	bcpid_parse_config(b);
 
 	b->first_callchain = false;
 }
@@ -1324,8 +1399,8 @@ bcpid_setup_pmc(struct bcpid *b)
 /*
  * PMCLOG event dispatcher
  */
-void
-bcpid_handle_pmclog(struct bcpid *b)
+static void
+bcpid_handle_pmclog(bcpid *b)
 {
 	struct pmclog_ev ev;
 	for (;;) {
@@ -1339,7 +1414,7 @@ bcpid_handle_pmclog(struct bcpid *b)
 			break;
 		}
 
-		struct bcpid_pmclog_event *bpev = &b->pmclog_events[ev.pl_type];
+		bcpid_pmclog_event *bpev = &b->pmclog_events[ev.pl_type];
 		++bpev->num_fire;
 
 		bcpid_event_handler handler = bpev->handler;
@@ -1350,38 +1425,17 @@ bcpid_handle_pmclog(struct bcpid *b)
 	}
 }
 
-void bcpid_printcpu();
-
-void
-bcpid_stop_all(struct bcpid *b)
+static void
+bcpid_start_all(bcpid *b)
 {
 	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *c = &b->pmc_ctrs[i];
+		bcpid_pmc_counter *c = &b->pmc_ctrs[i];
 		if (!c->is_valid) {
 			continue;
 		}
 
 		for (int j = 0; j < b->num_cpu; ++j) {
-			struct bcpid_pmc_cpu *cpu = &b->pmc_cpus[j];
-			int status = pmc_stop(cpu->pmcs[i]);
-			if (status < 0) {
-				PERROR("pmc_stop");
-			}
-		}
-	}
-}
-
-void
-bcpid_start_all(struct bcpid *b)
-{
-	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *c = &b->pmc_ctrs[i];
-		if (!c->is_valid) {
-			continue;
-		}
-
-		for (int j = 0; j < b->num_cpu; ++j) {
-			struct bcpid_pmc_cpu *cpu = &b->pmc_cpus[j];
+			bcpid_pmc_cpu *cpu = &b->pmc_cpus[j];
 			int status = pmc_start(cpu->pmcs[i]);
 			if (status < 0) {
 				PERROR("pmc_start");
@@ -1390,91 +1444,50 @@ bcpid_start_all(struct bcpid *b)
 	}
 }
 
-void
-bcpid_help()
+static void
+bcpid_stop_all(bcpid *b)
 {
-	printf("alloc       Allocate a new PMC\n");
-	printf("release     Release a PMC\n");
-	printf("pmcs        Show all supported PMCs\n");
-	printf("debug       Show statistics\n");
-	printf("save        Save collected data\n");
-	printf("start       Start all PMCs\n");
-	printf("stop        Stop all PMCs\n");
-	printf("quit        Exit bcpid\n");
-	printf("help        Show this message\n");
+	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
+		bcpid_pmc_counter *c = &b->pmc_ctrs[i];
+		if (!c->is_valid) {
+			continue;
+		}
+
+		for (int j = 0; j < b->num_cpu; ++j) {
+			bcpid_pmc_cpu *cpu = &b->pmc_cpus[j];
+			int status = pmc_stop(cpu->pmcs[i]);
+			if (status < 0) {
+				PERROR("pmc_stop");
+			}
+		}
+	}
 }
 
-void
-bcpid_handle_stdin(struct bcpid *b)
+static void
+bcpid_print_stats(bcpid *b)
 {
-	char line[128];
-	int r = read(STDIN_FILENO, line, 128);
-	if (r <= 0) {
-		PERROR("read");
-		return;
+	MSG("Statistics:");
+	MSG("\t%ld processes", b->pid_to_program.size());
+
+	MSG("\t%ld objects", b->path_to_object.size());
+	MSG("\t%d nodes", b->num_node);
+	MSG("\t%d edges", b->num_edge);
+	for (int i = 0; i < bcpid_debug_counter_max; ++i) {
+		MSG("\t%s: %ld", g_bcpid_debug_counter_name[i],
+		    b->debug_counter[i]);
 	}
 
-	const char *delim = " \n";
-	char *arg = strtok(line, delim);
-	if (!arg) {
-		goto fail;
+	MSG("Active counters:");
+	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
+		bcpid_pmc_counter *c = &b->pmc_ctrs[i];
+		if (!c->is_valid) {
+			continue;
+		}
+
+		MSG("\t%s sample_rate=%d %lu", c->name.c_str(), c->sample_rate,
+		    c->hits);
 	}
-
-	if (!strcmp(arg, "alloc")) {
-		char *name = strtok(0, delim);
-		if (!name) {
-			goto fail;
-		}
-		int count = b->default_count;
-		char *ctr = strtok(0, delim);
-		if (ctr) {
-			count = atoi(ctr);
-		}
-		bcpid_alloc_pmc(b, name, count);
-	} else if (!strcmp(arg, "release")) {
-		char *name = strtok(0, delim);
-		if (!name) {
-			goto fail;
-		}
-		bcpid_release_pmc(b, name, true);
-	} else if (!strcmp(arg, "pmcs")) {
-		bcpid_printcpu();
-	} else if (!strcmp(arg, "debug")) {
-		fprintf(stderr, "%ld processes\n", b->pid_to_program.size());
-
-		fprintf(stderr, "%ld objects\n", b->path_to_object.size());
-		fprintf(stderr, "%d nodes\n", b->num_node);
-		fprintf(stderr, "%d edges\n", b->num_edge);
-		for (int i = 0; i < bcpid_debug_counter_max; ++i) {
-			fprintf(stderr, "%s: %ld\n",
-			    g_bcpid_debug_counter_name[i], b->debug_counter[i]);
-		}
-	} else if (!strcmp(arg, "save")) {
-		bcpid_save(b);
-	} else if (!strcmp(arg, "stop")) {
-		bcpid_stop_all(b);
-	} else if (!strcmp(arg, "start")) {
-		bcpid_start_all(b);
-	} else if (!strcmp(arg, "quit")) {
-		g_quit = 1;
-	} else if (!strcmp(arg, "help")) {
-		bcpid_help();
-	} else {
-		MSG("unknown command: %s", arg);
-	}
-
-	return;
-fail:
-	(void)0;
 }
-
-struct bcpid_statistics {
-	int num_object;
-	int num_program;
-	int num_node;
-	int num_edge;
-	int num_object_hash;
-};
 
 void
 bcpid_collect_struct_stat(bcpid *b, bcpid_statistics *s)
@@ -1486,28 +1499,33 @@ bcpid_collect_struct_stat(bcpid *b, bcpid_statistics *s)
 	s->num_object_hash = b->object_hash_cache.size();
 }
 
-uint64_t
-tv_to_sec(const struct timeval *r)
+static uint64_t
+tv_to_usec(const struct timeval *r)
 {
 	uint64_t t = 0;
-	t += r->tv_usec;
+
 	t += r->tv_usec;
 	t += r->tv_sec * 1000000;
-	t += r->tv_sec * 1000000;
+
 	return t;
 }
+
+#if defined(BCPID_DEBUG)
+static uint64_t timer_counter = 0;
+#endif
 
 /*
  * Periodically run piece of code. See BCPID_INTERVAL for period.
  * Currently it collects performance metrics of daemon, and
  * save sample data to disk if they become too big.
  */
-void
+static void
 bcpid_handle_timer(bcpid *b)
 {
 	struct rusage r;
 	int status;
 	uint64_t new_time, old_time, time_diff;
+	bcpid_statistics stats;
 
 	status = getrusage(RUSAGE_SELF, &r);
 	if (status != 0) {
@@ -1515,23 +1533,26 @@ bcpid_handle_timer(bcpid *b)
 		abort();
 	}
 
-	new_time = tv_to_sec(&r.ru_utime) + tv_to_sec(&r.ru_stime);
-	old_time = tv_to_sec(&b->last_usage.ru_utime) +
-	    tv_to_sec(&b->last_usage.ru_stime);
+	new_time = tv_to_usec(&r.ru_utime) + tv_to_usec(&r.ru_stime);
+	old_time = tv_to_usec(&b->last_usage.ru_utime) +
+	    tv_to_usec(&b->last_usage.ru_stime);
 	time_diff = new_time - old_time;
-	/*
-	fprintf(stderr, "%f\n", (double)time_diff/(double)1000000);
 
-	fprintf(stderr, "%lu (d %lu) M %lu T %lu D %lu S %lu\n", new_time,
-		new_time - old_time, r.ru_maxrss, r.ru_ixrss, r.ru_idrss,
-		r.ru_isrss);
-	*/
-	bcpid_statistics stats;
 	bcpid_collect_struct_stat(b, &stats);
-	/*
-	fprintf(stderr, "%d %d %d %d %d\n", stats.num_object, stats.num_program,
-		stats.num_node, stats.num_edge, stats.num_object_hash);
-	*/
+
+#if defined(BCPID_DEBUG)
+	if ((timer_counter++ % 60) == 0) {
+		LOG("Resources:");
+		LOG("\tMemory Max RSS %lu MiB, CPU %lu ms", r.ru_maxrss / 1024,
+		    time_diff / 1000);
+		LOG("\tkernel_objects %lu, pids %lu", b->kernel_objects.size(),
+		    b->pid_to_program.size());
+		LOG("\tobjects %d, programs %d, nodes %d, edges %d, num_object_hash %d",
+		    stats.num_object, stats.num_program, stats.num_node,
+		    stats.num_edge, stats.num_object_hash);
+	}
+#endif
+
 	if (stats.num_edge > b->edge_collect_threshold ||
 	    stats.num_node > b->node_collect_threshold) {
 		MSG("saving...");
@@ -1545,56 +1566,12 @@ bcpid_handle_timer(bcpid *b)
 	b->last_usage = r;
 }
 
-void
-bcpid_main_loop(struct bcpid *b)
-{
-	while (!g_quit) {
-		int r = kevent(b->kqueue_fd, b->kevent_in_batch,
-		    b->kevent_in_size, b->kevent_out_batch, b->kevent_out_size,
-		    0);
-		b->kevent_in_size = 0;
-		if (r < 0) {
-			PERROR("kqueue");
-			break;
-		}
-
-		for (int i = 0; i < r; ++i) {
-			struct kevent *ke = &b->kevent_out_batch[i];
-			if (ke->filter == EVFILT_READ) {
-				if (ke->ident ==
-				    (unsigned long)b->non_block_pipefd[0]) {
-					bcpid_handle_pmclog(b);
-				}
-
-				if (ke->ident == STDIN_FILENO) {
-					bcpid_handle_stdin(b);
-				}
-			}
-
-			if (ke->filter == EVFILT_TIMER) {
-				if (ke->ident == BCPID_TIMER_MAGIC) {
-					bcpid_handle_timer(b);
-				}
-			}
-		}
-	}
-
-	bcpid_save(b);
-}
-
-void
-bcpid_shutdown(struct bcpid *b)
+static void
+bcpid_shutdown(bcpid *b)
 {
 	pmclog_close(b->pmclog_handle);
 
-	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
-		struct bcpid_pmc_counter *c = &b->pmc_ctrs[i];
-		if (!c->is_valid) {
-			continue;
-		}
-
-		bcpid_release_pmc(b, c->name, false);
-	}
+	bcpid_release_all(b);
 
 	int status = pmc_configure_logfile(-1);
 	if (status < 0) {
@@ -1602,11 +1579,11 @@ bcpid_shutdown(struct bcpid *b)
 	}
 }
 
-void
-bcpid_report(struct bcpid *b)
+static void
+bcpid_report(bcpid *b)
 {
 	for (int i = 0; i < b->num_pmclog_event; ++i) {
-		struct bcpid_pmclog_event *spec = &b->pmclog_events[i];
+		bcpid_pmclog_event *spec = &b->pmclog_events[i];
 		if (!spec->name) {
 			continue;
 		}
@@ -1616,140 +1593,8 @@ bcpid_report(struct bcpid *b)
 	bcpid_report_pmc_ctr(b);
 }
 
-void bcpid_printcpu();
-void bcpid_print_pmcs();
-void bcpid_print_events();
-void bcpid_term_handler(int);
-
-void
-bcpid_parse_global_config(struct bcpid *b)
-{
-	MSG("bcpid_parse_global_config() is unimplemented");
-	abort();
-}
-
 static void
-usage()
-{
-	fprintf(stderr,
-	    "Usage: bcpid [-c count] [-p pmc] [-o dir]\n"
-	    "\t-c count -- Sampling interval\n"
-	    "\t-h -- Help\n"
-	    "\t-o dir -- Output director\n"
-	    "\t-L -- List PMCs\n"
-	    "\t-p pmc -- PMC to monitor\n"
-	    "\t-f -- Foreground\n"
-	    "\t-l logfile -- Log bcpi daemon\n");
-}
-
-bool
-bcpid_parse_options(struct bcpid *b, int argc, const char *argv[])
-{
-	int opt;
-	struct stat s;
-
-	b->default_count = BCPID_DEFAULT_COUNT;
-	b->default_pmc = "";
-	b->default_output_dir = BCPID_OUTPUT_DIRECTORY;
-	b->pmc_override = false;
-	b->edge_collect_threshold = BCPID_EDGE_GC_THRESHOLD;
-	b->node_collect_threshold = BCPID_NODE_GC_THRESHOLD;
-	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
-
-	while ((opt = getopt(argc, (char **)argv, "hc:p:l:Lo:fv")) != -1) {
-		switch (opt) {
-		case 'c':
-			b->default_count = atoi(optarg);
-			break;
-		case 'h': {
-			usage();
-			exit(EX_OK);
-		}
-		case 'L': {
-			bcpid_printcpu();
-			exit(EX_OK);
-		}
-		case 'p': {
-			b->pmc_override = true;
-			b->default_pmc = strdup(optarg);
-			break;
-		}
-		case 'o': {
-			b->default_output_dir = strdup(optarg);
-			break;
-		}
-		case 'l': {
-			Debug_OpenLog(optarg);
-			break;
-		}
-		case 'f': {
-			foreground = true;
-			break;
-		}
-		case 'v': {
-			verbose++;
-			break;
-		}
-		default:
-			usage();
-			exit(EX_USAGE);
-		}
-	}
-
-	if (!verbose) {
-		/*
-		 * XXX: Hack since we get lots of errors in libpmcstat, but
-		 * this also hides some important errors!
-		 */
-		err_set_file(fopen("/dev/null", "w"));
-	}
-
-	if (stat(BCPID_OUTPUT_DIRECTORY, &s) == -1) {
-		MSG("Please create directory %s", BCPID_OUTPUT_DIRECTORY);
-		return false;
-	}
-
-	MSG("count set to %d", b->default_count);
-	if (b->pmc_override) {
-		MSG("overriding pmc counters to %s", b->default_pmc);
-	}
-	return true;
-}
-
-int
-main(int argc, const char *argv[])
-{
-	bcpid_signal_init(bcpid_term_handler);
-
-	struct bcpid b;
-
-	bcpid_pmc_init(&b);
-
-	if (!bcpid_parse_options(&b, argc, argv)) {
-		return EX_OK;
-	}
-
-	if (!foreground) {
-		pid_t p = fork();
-		if (p < 0) {
-			PERROR("fork");
-			exit(EX_OSERR);
-		}
-		if (p != 0)
-			exit(EX_OK);
-		Debug_Detach();
-	}
-
-	bcpid_setup_pmc(&b);
-	bcpid_main_loop(&b);
-	bcpid_shutdown(&b);
-	bcpid_report(&b);
-
-	return EX_OK;
-}
-
-void
-bcpid_printcpu()
+bcpid_print_pmcs()
 {
 	int status;
 	const struct pmc_cpuinfo *cpuinfo;
@@ -1796,92 +1641,268 @@ bcpid_printcpu()
 	}
 }
 
-void
-bcpid_print_pmcs()
+static void
+bcpid_help()
 {
-	int status;
-	int npmcs = pmc_npmc(0);
-	struct pmc_pmcinfo *pmcinfo;
-
-	status = pmc_pmcinfo(0, &pmcinfo);
-	if (status < 0) {
-		PERROR("pmc_pmcinfo");
-		exit(1);
-	}
-
-	MSG("---Dump PMCs---");
-	MSG("# of PMCs: %d", npmcs);
-
-	for (int i = 0; i < npmcs; i++) {
-		struct pmc_info *p = &pmcinfo->pm_pmcs[i];
-		MSG("Name: %s, Class: %s, Mode: %s", p->pm_name,
-		    pmc_name_of_class(p->pm_class),
-		    pmc_name_of_mode(p->pm_mode));
-	}
+	printf("alloc       Allocate a new PMC\n");
+	printf("release     Release a PMC\n");
+	printf("pmcs        Show all supported PMCs\n");
+	printf("reload      Reload configuration file\n");
+	printf("stats       Show statistics\n");
+	printf("save        Save collected data\n");
+	printf("start       Start all PMCs\n");
+	printf("stop        Stop all PMCs\n");
+	printf("quit        Exit bcpid\n");
+	printf("help        Show this message\n");
 }
 
-void
-bcpid_print_events()
+static void
+bcpid_handle_stdin(bcpid *b)
 {
-	int status;
-	const struct pmc_cpuinfo *cpuinfo;
-
-	status = pmc_cpuinfo(&cpuinfo);
-	if (status < 0) {
-		PERROR("pmc_cpuinfo");
-		exit(1);
+	char line[128];
+	int r = read(STDIN_FILENO, line, 128);
+	if (r <= 0) {
+		PERROR("read");
+		return;
 	}
 
-	MSG("--- Dump Events ---");
-	for (int i = 0; i < cpuinfo->pm_nclass; i++) {
-		int evts;
-		const char **evtlst;
-		enum pmc_class c = cpuinfo->pm_classes[i].pm_class;
+	const char *delim = " \n";
+	char *arg = strtok(line, delim);
+	if (!arg) {
+		goto fail;
+	}
 
-		status = pmc_event_names_of_class(c, &evtlst, &evts);
-		if (status < 0) {
-			PERROR("pmc_event_names_of_class");
-			return;
+	if (!strcmp(arg, "alloc")) {
+		char *name = strtok(0, delim);
+		if (!name) {
+			goto fail;
 		}
 
-		MSG("Class: %s", pmc_name_of_class(c));
-		for (int j = 0; j < evts; j++) {
-			fprintf(stderr, "  %s\n", evtlst[j]);
+		char *ctr = strtok(0, delim);
+		bcpid_alloc_pmc(b, name, ctr ? atoi(ctr) : b->default_count);
+	} else if (!strcmp(arg, "release")) {
+		char *name = strtok(0, delim);
+		if (!name) {
+			goto fail;
+		}
+		bcpid_release_pmc(b, name);
+	} else if (!strcmp(arg, "pmcs")) {
+		bcpid_print_pmcs();
+	} else if (!strcmp(arg, "stats")) {
+		bcpid_print_stats(b);
+	} else if (!strcmp(arg, "save")) {
+		bcpid_save(b);
+	} else if (!strcmp(arg, "stop")) {
+		bcpid_stop_all(b);
+	} else if (!strcmp(arg, "start")) {
+		bcpid_start_all(b);
+	} else if (!strcmp(arg, "reload")) {
+		bcpid_save(b);
+		bcpid_release_all(b);
+		bcpid_parse_config(b);
+	} else if (!strcmp(arg, "quit")) {
+		b->g_quit = 1;
+	} else if (!strcmp(arg, "help")) {
+		bcpid_help();
+	} else {
+		MSG("unknown command: %s", arg);
+	}
+
+	return;
+fail:
+	(void)0;
+}
+
+static void
+bcpid_main_loop(bcpid *b)
+{
+	while (!b->g_quit) {
+		int r = kevent(b->kqueue_fd, b->kevent_in_batch,
+		    b->kevent_in_size, b->kevent_out_batch, b->kevent_out_size,
+		    0);
+		b->kevent_in_size = 0;
+		if (r < 0) {
+			PERROR("kqueue");
+			break;
+		}
+
+		for (int i = 0; i < r; ++i) {
+			struct kevent *ke = &b->kevent_out_batch[i];
+			if (ke->filter == EVFILT_READ) {
+				if (ke->ident ==
+				    (unsigned long)b->non_block_pipefd[0]) {
+					bcpid_handle_pmclog(b);
+				}
+
+				if (ke->ident == STDIN_FILENO) {
+					bcpid_handle_stdin(b);
+				}
+			}
+
+			if (ke->filter == EVFILT_TIMER) {
+				if (ke->ident == BCPID_TIMER_MAGIC) {
+					bcpid_handle_timer(b);
+				}
+			}
+
+			if (ke->filter == EVFILT_SIGNAL) {
+				if (ke->ident == SIGTERM ||
+				    ke->ident == SIGINT) {
+					MSG("Received SIGTERM");
+					b->g_quit = 1;
+				}
+				if (ke->ident == SIGHUP) {
+					MSG("Received SIGHUP");
+					bcpid_save(b);
+					bcpid_release_all(b);
+					bcpid_parse_config(b);
+				}
+				if (ke->ident == SIGINFO) {
+					bcpid_print_stats(b);
+				}
+			}
 		}
 	}
+
+	bcpid_save(b);
 }
 
-void
-bcpid_term_handler(int num)
+static void
+usage()
 {
-	g_quit = 1;
-	MSG("received %s", strsignal(num));
+	fprintf(stderr,
+	    "Usage: bcpid [-c count] [-p pmc1;pmc2;...] [-o dir]\n"
+	    "\t-L            List PMCs\n"
+	    "\t-c config     Configuration file\n"
+	    "\t-f            Foreground\n"
+	    "\t-h            Help\n"
+	    "\t-n rate       Sampling rate\n"
+	    "\t-o dir        Output director\n"
+	    "\t-p pmc        PMCs to monitor\n"
+	    "\t-l logfile    Log bcpi daemon\n"
+	    "\t-v            Verbose\n");
 }
 
-const char *g_bcpid_pmclog_name[] = { "PMCLOG_TYPE_PADDING",
-	"PMCLOG_TYPE_CLOSEMSG", "PMCLOG_TYPE_DROPNOTIFY",
-	"PMCLOG_TYPE_INITIALIZE", "PMCLOG_TYPE_PADDING",
-	"PMCLOG_TYPE_PMCALLOCATE", "PMCLOG_TYPE_PMCATTACH",
-	"PMCLOG_TYPE_PMCDETACH", "PMCLOG_TYPE_PROCCSW", "PMCLOG_TYPE_PROCEXEC",
-	"PMCLOG_TYPE_PROCEXIT", "PMCLOG_TYPE_PROCFORK", "PMCLOG_TYPE_SYSEXIT",
-	"PMCLOG_TYPE_USERDATA", "PMCLOG_TYPE_MAP_IN", "PMCLOG_TYPE_MAP_OUT",
-	"PMCLOG_TYPE_CALLCHAIN", "PMCLOG_TYPE_PMCALLOCATEDYN",
-	"PMCLOG_TYPE_THR_CREATE", "PMCLOG_TYPE_THR_EXIT",
-	"PMCLOG_TYPE_PROC_CREATE", 0 };
+static bool
+bcpid_parse_options(bcpid *b, int argc, const char *argv[])
+{
+	int opt;
+	struct stat s;
 
-const char *g_bcpid_pmclog_state_name[] = { "PMCLOG_OK", "PMCLOG_EOF",
-	"PMCLOG_REQUIRE_DATA", "PMCLOG_ERROR", 0 };
+	b->config_file = "";
+	b->default_count = BCPID_DEFAULT_COUNT;
+	b->default_pmc = "";
+	b->default_output_dir = BCPID_OUTPUT_DIRECTORY;
+	b->pmc_override = false;
+	b->edge_collect_threshold = BCPID_EDGE_GC_THRESHOLD;
+	b->node_collect_threshold = BCPID_NODE_GC_THRESHOLD;
+	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
 
-const char *g_bcpid_debug_counter_name[] = {
-	"bcpid_debug_empty_mapin_name",
-	"bcpid_debug_empty_mapping_pc",
-	"bcpid_debug_pc_before_mapping",
-	"bcpid_debug_pc_after_mapping",
-	"bcpid_debug_getprocs_fail",
-	"bcpid_debug_getvmmap_fail",
-	"bcpid_debug_callchain_self_fire",
-	"bcpid_debug_callchain_proc_init_fail",
-	"bcpid_debug_callchain_counter_gone",
-	"bcpid_debug_callchain_pc_skip",
-	"bcpid_debug_counter_max",
-};
+	while ((opt = getopt(argc, (char **)argv, "Lc:fhn:o:p:l:v")) != -1) {
+		switch (opt) {
+		case 'L': {
+			bcpid_print_pmcs();
+			exit(EX_OK);
+		}
+		case 'c': {
+			b->config_file = optarg;
+			break;
+		}
+		case 'f': {
+			foreground = true;
+			break;
+		}
+		case 'h': {
+			usage();
+			exit(EX_OK);
+		}
+		case 'n':
+			b->default_count = atoi(optarg);
+			break;
+		case 'o': {
+			b->default_output_dir = optarg;
+			break;
+		}
+		case 'p': {
+			b->pmc_override = true;
+			b->default_pmc = optarg;
+			break;
+		}
+		case 'l': {
+			Debug_OpenLog(optarg);
+			break;
+		}
+		case 'v': {
+			verbose++;
+			break;
+		}
+		default:
+			usage();
+			exit(EX_USAGE);
+		}
+	}
+
+	if (!verbose) {
+		/*
+		 * XXX: Hack since we get lots of errors in libpmcstat, but
+		 * this also hides some important errors!
+		 */
+		err_set_file(fopen("/dev/null", "w"));
+	}
+
+	if (stat(BCPID_OUTPUT_DIRECTORY, &s) == -1) {
+		WARNING("Please create directory %s", BCPID_OUTPUT_DIRECTORY);
+		return false;
+	}
+
+	MSG("Default sampling rate is %d", b->default_count);
+	if (b->pmc_override) {
+		MSG("Overriding pmc counters to %s", b->default_pmc.c_str());
+	}
+
+	return true;
+}
+
+int
+main(int argc, const char *argv[])
+{
+	bcpid b = bcpid();
+	struct sigaction sa;
+
+	/*
+	 * Ignore SIGTERM, SIGINT and SIGHUP that will be handled in the kevent
+	 * loop.  SIGTERM and SIGINT will gracefully exit saving all state,
+	 * while SIGHUP allows the user to reload the configuration file.
+	 */
+	memset(&sa, 0, sizeof(sa));
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGTERM, &sa, nullptr);
+	sigaction(SIGINT, &sa, nullptr);
+	sigaction(SIGHUP, &sa, nullptr);
+
+	bcpid_pmc_init(&b);
+
+	if (!bcpid_parse_options(&b, argc, argv)) {
+		return EX_OK;
+	}
+
+	if (!foreground) {
+		pid_t p = fork();
+		if (p < 0) {
+			PERROR("fork");
+			exit(EX_OSERR);
+		}
+		if (p != 0)
+			exit(EX_OK);
+		Debug_Detach();
+	}
+
+	bcpid_setup_pmc(&b);
+	bcpid_main_loop(&b);
+	bcpid_shutdown(&b);
+	bcpid_report(&b);
+
+	return EX_OK;
+}
+
