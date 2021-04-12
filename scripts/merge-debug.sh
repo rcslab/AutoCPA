@@ -2,6 +2,13 @@
 
 # https://stackoverflow.com/a/17599967/502399
 
+set -eu
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <BINARY> <DEBUG> <OUTPUT>" >&2
+    exit 1
+fi
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}"/merge-debug.XXXXXXXXXX)"
 
 objcopy $(objdump -h "$2" \
