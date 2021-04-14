@@ -1,9 +1,7 @@
 #!/bin/sh
 
 if [ $# -lt 2 ]; then
-    cat >&2 <<EOF
-Usage: $0 /path/to/projects /path/to/address_info.csv /path/to/binary [OPTS]
-EOF
+    echo "Usage: $0 /path/to/projects /path/to/address_info.csv /path/to/binary [OPTS]" >&2
     exit 1
 fi
 
