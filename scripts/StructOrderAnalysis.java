@@ -37,7 +37,6 @@ import ghidra.util.task.TaskMonitor;
 
 import generic.concurrent.QCallback;
 
-import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
@@ -97,11 +96,13 @@ public class StructOrderAnalysis extends GhidraScript {
 		final Structure struct;
 		final int nSamples;
 		final int nPatterns;
+		final int improvement;
 
-		SummaryRow(Structure struct, int nSamples, int nPatterns) {
+		SummaryRow(Structure struct, int nSamples, int nPatterns, int improvement) {
 			this.struct = struct;
 			this.nSamples = nSamples;
 			this.nPatterns = nPatterns;
+			this.improvement = improvement;
 		}
 	}
 
@@ -114,34 +115,39 @@ public class StructOrderAnalysis extends GhidraScript {
 				nSamples += patterns.getCount(struct, pattern);
 				nPatterns += 1;
 			}
-			rows.add(new SummaryRow(struct, nSamples, nPatterns));
+
+			int before = patterns.score(struct, struct);
+			int after = patterns.score(struct, patterns.optimize(struct));
+			rows.add(new SummaryRow(struct, nSamples, nPatterns, before - after));
 		}
 
 		Collections.sort(rows, Comparator
-			.<SummaryRow>comparingInt(r -> r.nSamples)
+			.<SummaryRow>comparingInt(r -> r.improvement)
 			.reversed());
 
-		System.out.print("Found data for these structs:\n\n");
-
-		int longestName = rows.stream()
-			.mapToInt(row -> row.struct.getName().length())
-			.max()
-			.orElse(0);
-		int longestSamples = rows.stream()
-			.mapToInt(row -> Integer.toString(row.nSamples).length())
-			.max()
-			.orElse(0);
-		int longestPatterns = rows.stream()
-			.mapToInt(row -> Integer.toString(row.nPatterns).length())
-			.max()
-			.orElse(0);
+		Table table = new Table();
+		table.addColumn(); // Struct name
+		table.addColumn(); // Samples
+		table.addColumn(); // Patterns
+		table.addColumn(); // Improvement
 
 		for (SummaryRow row : rows) {
-			String name = Strings.padEnd(row.struct.getName(), longestName, ' ');
-			String nSamples = Strings.padStart(Integer.toString(row.nSamples), longestSamples, ' ');
-			String nPatterns = Strings.padStart(Integer.toString(row.nPatterns), longestPatterns, ' ');
-			System.out.format("%s  %s samples, %s patterns\n", name, nSamples, nPatterns);
+			int n = table.addRow();
+			table.get(n, 0)
+				.append(row.struct.getName());
+			table.get(n, 1)
+				.append(row.nSamples)
+				.append(" samples");
+			table.get(n, 2)
+				.append(row.nPatterns)
+				.append(" patterns");
+			table.get(n, 3)
+				.append("improvement: ")
+				.append(row.improvement);
 		}
+
+		System.out.print("Found data for these structs:\n\n");
+		System.out.print(table);
 	}
 
 	private void printDetails(AccessPatterns patterns, String filterRegex) {
@@ -151,7 +157,15 @@ public class StructOrderAnalysis extends GhidraScript {
 			}
 
 			printOriginal(patterns, struct);
-			printOptimized(patterns.optimize(struct));
+			int before = patterns.score(struct, struct);
+
+			Structure optimized = patterns.optimize(struct);
+			printOptimized(optimized);
+			int after = patterns.score(struct, optimized);
+
+			System.out.format("Improvement: %d (before: %d, after: %d)\n", before - after, before, after);
+
+			System.out.print("\n---\n");
 		}
 	}
 
@@ -250,7 +264,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		addPadding(table, padding);
 
 		System.out.print(table);
-		System.out.print("};\n\n--\n");
+		System.out.print("};\n\n");
 	}
 
 	private int addField(Table table, DataTypeComponent field) {
@@ -967,37 +981,156 @@ class AccessPatterns {
 	 * Optimize the layout of a struct according to its access pattern.
 	 */
 	Structure optimize(Structure struct) {
-		List<DataTypeComponent> fields = new ArrayList<>();
+		Set<DataTypeComponent> added = new HashSet<>();
+		List<Bucket> buckets = new ArrayList<>();
 
 		// Pack the most common access patterns first
 		for (AccessPattern pattern : getPatterns(struct)) {
-			List<DataTypeComponent> patternFields = new ArrayList<>(pattern.getFields());
-
-			// Sort by highest alignment first to reduce holes
-			Collections.sort(patternFields, Comparator
-				.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
-				.thenComparingInt(f -> f.getDataType().getLength())
-				.reversed());
-
-			for (DataTypeComponent field : patternFields) {
-				if (!fields.contains(field)) {
-					fields.add(field);
-				}
-			}
+			Set<DataTypeComponent> fields = pattern.getFields();
+			fields.removeAll(added);
+			Bucket.pack(buckets, fields);
+			added.addAll(fields);
 		}
 
 		// Add any missing fields we didn't see get accessed
 		for (DataTypeComponent field : struct.getComponents()) {
 			// Skip padding
-			if (!field.getDataType().equals(DefaultDataType.dataType) && !fields.contains(field)) {
-				fields.add(field);
+			if (!field.getDataType().equals(DefaultDataType.dataType) && !added.contains(field)) {
+				Bucket.pack(buckets, field);
 			}
 		}
 
 		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
-		for (DataTypeComponent field : fields) {
-			optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
+		for (Bucket bucket : buckets) {
+			for (DataTypeComponent field : bucket.getFields()) {
+				optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
+			}
 		}
 		return optimized;
+	}
+
+	/**
+	 * Compute the cost of a structure reordering in our simple cache model.
+	 */
+	int score(Structure original, Structure struct) {
+		int score = 0;
+
+		for (AccessPattern pattern : getPatterns(original)) {
+			Set<Integer> cacheLines = new HashSet<>();
+			for (DataTypeComponent field : pattern.getFields()) {
+				int start = 0;
+				int end = 0;
+				for (DataTypeComponent optField : struct.getComponents()) {
+					if (field.getFieldName().equals(optField.getFieldName())) {
+						start = field.getOffset();
+						end = field.getEndOffset();
+						break;
+					}
+				}
+				for (int i = start / 64; i <= (end - 1) / 64; ++i) {
+					cacheLines.add(i);
+				}
+			}
+
+			score += getCount(original, pattern) * cacheLines.size();
+		}
+
+		return score;
+	}
+}
+
+/**
+ * A bucket of fields for structure optimization.
+ */
+class Bucket {
+	/** Maximum one cache line. */
+	private static final int MAX_SIZE = 64;
+
+	private List<DataTypeComponent> fields;
+	private int size;
+
+	private Bucket(List<DataTypeComponent> fields) {
+		this.fields = fields;
+		this.size = sizeOf(fields);
+	}
+
+	List<DataTypeComponent> getFields() {
+		return this.fields;
+	}
+
+	/**
+	 * Add a field into a list of buckets.
+	 */
+	static void pack(List<Bucket> buckets, DataTypeComponent field) {
+		pack(buckets, Collections.singletonList(field));
+	}
+
+	/**
+	 * Add some fields into a list of buckets.
+	 */
+	static void pack(List<Bucket> buckets, Collection<DataTypeComponent> fields) {
+		for (Bucket bucket : buckets) {
+			if (bucket.tryAdd(fields)) {
+				return;
+			}
+		}
+
+		List<DataTypeComponent> fieldList = new ArrayList<>(fields);
+		sort(fieldList);
+
+		while (!fieldList.isEmpty()) {
+			int i = 1;
+			while (i < fieldList.size() && sizeOf(fieldList.subList(0, i + 1)) <= MAX_SIZE) {
+				++i;
+			}
+			buckets.add(new Bucket(fieldList.subList(0, i)));
+			fieldList = fieldList.subList(i, fieldList.size());
+		}
+	}
+
+	/**
+	 * Try to add some fields to this bucket.
+	 *
+	 * @return Whether the fields were successfully added.
+	 */
+	private boolean tryAdd(Collection<DataTypeComponent> fields) {
+		List<DataTypeComponent> newFields = new ArrayList<>(this.fields);
+		newFields.addAll(fields);
+		sort(newFields);
+
+		if (size == 0 || sizeOf(newFields) <= MAX_SIZE) {
+			this.fields = newFields;
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	/**
+	 * Sort a sequence of fields to reduce holes.
+	 */
+	private static void sort(List<DataTypeComponent> fields) {
+		// Sort by highest alignment first to reduce holes
+		Collections.sort(fields, Comparator
+			.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
+			.thenComparingInt(f -> f.getDataType().getLength())
+			.reversed());
+	}
+
+	/**
+	 * Compute the size of a sequence of fields.
+	 */
+	private static int sizeOf(List<DataTypeComponent> fields) {
+		int size = 0;
+
+		for (DataTypeComponent field : fields) {
+			int align = field.getDataType().getAlignment();
+			if (size % align != 0) {
+				size += align - (size % align);
+			}
+			size += field.getDataType().getLength();
+		}
+
+		return size;
 	}
 }
