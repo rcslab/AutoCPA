@@ -967,37 +967,127 @@ class AccessPatterns {
 	 * Optimize the layout of a struct according to its access pattern.
 	 */
 	Structure optimize(Structure struct) {
-		List<DataTypeComponent> fields = new ArrayList<>();
+		Set<DataTypeComponent> added = new HashSet<>();
+		List<Bucket> buckets = new ArrayList<>();
 
 		// Pack the most common access patterns first
 		for (AccessPattern pattern : getPatterns(struct)) {
-			List<DataTypeComponent> patternFields = new ArrayList<>(pattern.getFields());
-
-			// Sort by highest alignment first to reduce holes
-			Collections.sort(patternFields, Comparator
-				.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
-				.thenComparingInt(f -> f.getDataType().getLength())
-				.reversed());
-
-			for (DataTypeComponent field : patternFields) {
-				if (!fields.contains(field)) {
-					fields.add(field);
-				}
-			}
+			Set<DataTypeComponent> fields = pattern.getFields();
+			fields.removeAll(added);
+			Bucket.pack(buckets, fields);
+			added.addAll(fields);
 		}
 
 		// Add any missing fields we didn't see get accessed
 		for (DataTypeComponent field : struct.getComponents()) {
 			// Skip padding
-			if (!field.getDataType().equals(DefaultDataType.dataType) && !fields.contains(field)) {
-				fields.add(field);
+			if (!field.getDataType().equals(DefaultDataType.dataType) && !added.contains(field)) {
+				Bucket.pack(buckets, field);
 			}
 		}
 
 		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
-		for (DataTypeComponent field : fields) {
-			optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
+		for (Bucket bucket : buckets) {
+			for (DataTypeComponent field : bucket.getFields()) {
+				optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
+			}
 		}
 		return optimized;
+	}
+}
+
+/**
+ * A bucket of fields for structure optimization.
+ */
+class Bucket {
+	/** Maximum one cache line. */
+	private static final int MAX_SIZE = 64;
+
+	private List<DataTypeComponent> fields;
+	private int size;
+
+	private Bucket(List<DataTypeComponent> fields) {
+		this.fields = fields;
+		this.size = sizeOf(fields);
+	}
+
+	List<DataTypeComponent> getFields() {
+		return this.fields;
+	}
+
+	/**
+	 * Add a field into a list of buckets.
+	 */
+	static void pack(List<Bucket> buckets, DataTypeComponent field) {
+		pack(buckets, Collections.singletonList(field));
+	}
+
+	/**
+	 * Add some fields into a list of buckets.
+	 */
+	static void pack(List<Bucket> buckets, Collection<DataTypeComponent> fields) {
+		for (Bucket bucket : buckets) {
+			if (bucket.tryAdd(fields)) {
+				return;
+			}
+		}
+
+		List<DataTypeComponent> fieldList = new ArrayList<>(fields);
+		sort(fieldList);
+
+		while (!fieldList.isEmpty()) {
+			int i = 1;
+			while (i < fieldList.size() && sizeOf(fieldList.subList(0, i + 1)) <= MAX_SIZE) {
+				++i;
+			}
+			buckets.add(new Bucket(fieldList.subList(0, i)));
+			fieldList = fieldList.subList(i, fieldList.size());
+		}
+	}
+
+	/**
+	 * Try to add some fields to this bucket.
+	 *
+	 * @return Whether the fields were successfully added.
+	 */
+	private boolean tryAdd(Collection<DataTypeComponent> fields) {
+		List<DataTypeComponent> newFields = new ArrayList<>(this.fields);
+		newFields.addAll(fields);
+		sort(newFields);
+
+		if (size == 0 || sizeOf(newFields) <= MAX_SIZE) {
+			this.fields = newFields;
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	/**
+	 * Sort a sequence of fields to reduce holes.
+	 */
+	private static void sort(List<DataTypeComponent> fields) {
+		// Sort by highest alignment first to reduce holes
+		Collections.sort(fields, Comparator
+			.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
+			.thenComparingInt(f -> f.getDataType().getLength())
+			.reversed());
+	}
+
+	/**
+	 * Compute the size of a sequence of fields.
+	 */
+	private static int sizeOf(List<DataTypeComponent> fields) {
+		int size = 0;
+
+		for (DataTypeComponent field : fields) {
+			int align = field.getDataType().getAlignment();
+			if (size % align != 0) {
+				size += align - (size % align);
+			}
+			size += field.getDataType().getLength();
+		}
+
+		return size;
 	}
 }
