@@ -37,7 +37,6 @@ import ghidra.util.task.TaskMonitor;
 
 import generic.concurrent.QCallback;
 
-import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
@@ -97,11 +96,13 @@ public class StructOrderAnalysis extends GhidraScript {
 		final Structure struct;
 		final int nSamples;
 		final int nPatterns;
+		final int improvement;
 
-		SummaryRow(Structure struct, int nSamples, int nPatterns) {
+		SummaryRow(Structure struct, int nSamples, int nPatterns, int improvement) {
 			this.struct = struct;
 			this.nSamples = nSamples;
 			this.nPatterns = nPatterns;
+			this.improvement = improvement;
 		}
 	}
 
@@ -114,34 +115,39 @@ public class StructOrderAnalysis extends GhidraScript {
 				nSamples += patterns.getCount(struct, pattern);
 				nPatterns += 1;
 			}
-			rows.add(new SummaryRow(struct, nSamples, nPatterns));
+
+			int before = patterns.score(struct, struct);
+			int after = patterns.score(struct, patterns.optimize(struct));
+			rows.add(new SummaryRow(struct, nSamples, nPatterns, before - after));
 		}
 
 		Collections.sort(rows, Comparator
-			.<SummaryRow>comparingInt(r -> r.nSamples)
+			.<SummaryRow>comparingInt(r -> r.improvement)
 			.reversed());
 
-		System.out.print("Found data for these structs:\n\n");
-
-		int longestName = rows.stream()
-			.mapToInt(row -> row.struct.getName().length())
-			.max()
-			.orElse(0);
-		int longestSamples = rows.stream()
-			.mapToInt(row -> Integer.toString(row.nSamples).length())
-			.max()
-			.orElse(0);
-		int longestPatterns = rows.stream()
-			.mapToInt(row -> Integer.toString(row.nPatterns).length())
-			.max()
-			.orElse(0);
+		Table table = new Table();
+		table.addColumn(); // Struct name
+		table.addColumn(); // Samples
+		table.addColumn(); // Patterns
+		table.addColumn(); // Improvement
 
 		for (SummaryRow row : rows) {
-			String name = Strings.padEnd(row.struct.getName(), longestName, ' ');
-			String nSamples = Strings.padStart(Integer.toString(row.nSamples), longestSamples, ' ');
-			String nPatterns = Strings.padStart(Integer.toString(row.nPatterns), longestPatterns, ' ');
-			System.out.format("%s  %s samples, %s patterns\n", name, nSamples, nPatterns);
+			int n = table.addRow();
+			table.get(n, 0)
+				.append(row.struct.getName());
+			table.get(n, 1)
+				.append(row.nSamples)
+				.append(" samples");
+			table.get(n, 2)
+				.append(row.nPatterns)
+				.append(" patterns");
+			table.get(n, 3)
+				.append("improvement: ")
+				.append(row.improvement);
 		}
+
+		System.out.print("Found data for these structs:\n\n");
+		System.out.print(table);
 	}
 
 	private void printDetails(AccessPatterns patterns, String filterRegex) {
@@ -151,7 +157,15 @@ public class StructOrderAnalysis extends GhidraScript {
 			}
 
 			printOriginal(patterns, struct);
-			printOptimized(patterns.optimize(struct));
+			int before = patterns.score(struct, struct);
+
+			Structure optimized = patterns.optimize(struct);
+			printOptimized(optimized);
+			int after = patterns.score(struct, optimized);
+
+			System.out.format("Improvement: %d (before: %d, after: %d)\n", before - after, before, after);
+
+			System.out.print("\n---\n");
 		}
 	}
 
@@ -250,7 +264,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		addPadding(table, padding);
 
 		System.out.print(table);
-		System.out.print("};\n\n--\n");
+		System.out.print("};\n\n");
 	}
 
 	private int addField(Table table, DataTypeComponent field) {
@@ -993,6 +1007,35 @@ class AccessPatterns {
 			}
 		}
 		return optimized;
+	}
+
+	/**
+	 * Compute the cost of a structure reordering in our simple cache model.
+	 */
+	int score(Structure original, Structure struct) {
+		int score = 0;
+
+		for (AccessPattern pattern : getPatterns(original)) {
+			Set<Integer> cacheLines = new HashSet<>();
+			for (DataTypeComponent field : pattern.getFields()) {
+				int start = 0;
+				int end = 0;
+				for (DataTypeComponent optField : struct.getComponents()) {
+					if (field.getFieldName().equals(optField.getFieldName())) {
+						start = field.getOffset();
+						end = field.getEndOffset();
+						break;
+					}
+				}
+				for (int i = start / 64; i <= (end - 1) / 64; ++i) {
+					cacheLines.add(i);
+				}
+			}
+
+			score += getCount(original, pattern) * cacheLines.size();
+		}
+
+		return score;
 	}
 }
 
