@@ -39,6 +39,8 @@ import generic.concurrent.QCallback;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
 import com.google.common.collect.SetMultimap;
@@ -647,7 +649,7 @@ class AccessPattern {
 	private final Set<DataTypeComponent> fields;
 
 	AccessPattern(Set<DataTypeComponent> fields) {
-		this.fields = fields;
+		this.fields = ImmutableSet.copyOf(fields);
 	}
 
 	Set<DataTypeComponent> getFields() {
@@ -825,8 +827,6 @@ class ControlFlowGraph {
 	 * Get the basic blocks that are guaranteed to be reached from the given address.
 	 */
 	Set<CodeBlock> definitelyReachedBlocks(Address address) throws Exception {
-		if (this.domTree == null) return Collections.emptySet();
-
 		List<CodeBlockVertex> sources = new ArrayList<>();
 		for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, this.monitor)) {
 			sources.add(new CodeBlockVertex(block));
@@ -929,15 +929,17 @@ class AccessPatterns {
 	 * @return All the structures about which we have data.
 	 */
 	Set<Structure> getStructures() {
-		return this.patterns.keySet();
+		return Collections.unmodifiableSet(this.patterns.keySet());
 	}
 
 	/**
 	 * @return All the access patterns we saw for a structure, from most to least often.
 	 */
 	Set<AccessPattern> getPatterns(Structure struct) {
-		return Multisets.copyHighestCountFirst(this.patterns.get(struct))
-			.elementSet();
+		return ImmutableSet.copyOf(
+			Multisets.copyHighestCountFirst(this.patterns.get(struct))
+				.elementSet()
+		);
 	}
 
 	/**
@@ -974,7 +976,7 @@ class AccessPatterns {
 	 * @return The functions which had the given access pattern.
 	 */
 	Set<Function> getFunctions(AccessPattern pattern) {
-		return this.functions.get(pattern);
+		return Collections.unmodifiableSet(this.functions.get(pattern));
 	}
 
 	/**
@@ -986,7 +988,7 @@ class AccessPatterns {
 
 		// Pack the most common access patterns first
 		for (AccessPattern pattern : getPatterns(struct)) {
-			Set<DataTypeComponent> fields = pattern.getFields();
+			Set<DataTypeComponent> fields = new HashSet<>(pattern.getFields());
 			fields.removeAll(added);
 			Bucket.pack(buckets, fields);
 			added.addAll(fields);
@@ -1017,6 +1019,7 @@ class AccessPatterns {
 
 		for (AccessPattern pattern : getPatterns(original)) {
 			Set<Integer> cacheLines = new HashSet<>();
+
 			for (DataTypeComponent field : pattern.getFields()) {
 				int start = 0;
 				int end = 0;
@@ -1050,7 +1053,7 @@ class Bucket {
 	private int size;
 
 	private Bucket(List<DataTypeComponent> fields) {
-		this.fields = fields;
+		this.fields = ImmutableList.copyOf(fields);
 		this.size = sizeOf(fields);
 	}
 
