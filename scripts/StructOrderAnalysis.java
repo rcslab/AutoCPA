@@ -806,22 +806,56 @@ class ControlFlowGraph {
 			}
 		}
 
-		// Make sure the graph has a unique source and sink
-		CodeBlockVertex source = new CodeBlockVertex("SOURCE");
-		for (CodeBlockVertex vertex : GraphAlgorithms.getSources(graph)) {
-			graph.addVertex(source);
-			graph.addEdge(new CodeBlockEdge(source, vertex));
-		}
-
 		// The function entry point is a sink, since the graph is reversed
 		CodeBlockVertex sink = new CodeBlockVertex("SINK");
+		graph.addVertex(sink);
 		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
 			CodeBlockVertex vertex = interner.computeIfAbsent(new CodeBlockVertex(block), v -> v);
-			graph.addVertex(sink);
 			graph.addEdge(new CodeBlockEdge(vertex, sink));
 		}
 
+		// Make sure the graph has a unique source
+		CodeBlockVertex source = new CodeBlockVertex("SOURCE");
+		Set<CodeBlockVertex> sources = GraphAlgorithms.getSources(graph);
+		if (sources.isEmpty()) {
+			CodeBlockVertex vertex = findInfiniteLoopFooter(graph);
+			graph.addVertex(source);
+			graph.addEdge(new CodeBlockEdge(source, vertex));
+		} else {
+			graph.addVertex(source);
+			for (CodeBlockVertex vertex : sources) {
+				graph.addEdge(new CodeBlockEdge(source, vertex));
+			}
+		}
+
 		this.domTree = GraphAlgorithms.findDominanceTree(graph, monitor);
+	}
+
+	/**
+	 * Functions that loop forever have no source nodes in the transposed
+	 * CFG.  Here we select an arbitrary node from the infinite loop to make
+	 * into the source, so that we can construct the post-dominance tree.
+	 */
+	static CodeBlockVertex findInfiniteLoopFooter(GDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph) {
+		// The arbirary vertex we select is the first one that has only
+		// back-edges (to previously executed blocks)
+		Set<CodeBlockVertex> seen = new HashSet<>();
+		List<CodeBlockVertex> stack = new ArrayList<>(GraphAlgorithms.getSinks(graph));
+		while (!stack.isEmpty()) {
+			CodeBlockVertex vertex = stack.remove(stack.size() - 1);
+			boolean allSeen = true;
+			for (CodeBlockVertex parent : graph.getPredecessors(vertex)) {
+				if (seen.add(parent)) {
+					allSeen = false;
+					stack.add(parent);
+				}
+			}
+			if (allSeen) {
+				return vertex;
+			}
+		}
+
+		throw new RuntimeException("Could not find a back-edge in an infinitely looping function");
 	}
 
 	/**
