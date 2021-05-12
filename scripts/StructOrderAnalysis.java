@@ -86,6 +86,7 @@ public class StructOrderAnalysis extends GhidraScript {
 
 		// Use our collected data to infer field access patterns
 		AccessPatterns patterns = AccessPatterns.collect(this.currentProgram, data, refs, this.monitor);
+		Msg.info(this, "Found patterns for " + (100.0 * patterns.getHitRate()) + "% of samples");
 
 		if (args.length > 1) {
 			printDetails(patterns, args[1]);
@@ -855,6 +856,8 @@ class AccessPatterns {
 	private final BasicBlockModel bbModel;
 	private final BcpiData data;
 	private final FieldReferences refs;
+	private long samples = 0;
+	private long attributed = 0;
 
 	private AccessPatterns(Program program, BcpiData data, FieldReferences refs) {
 		this.listing = program.getListing();
@@ -893,8 +896,9 @@ class AccessPatterns {
 				}
 			}
 
-			if (pattern.isEmpty()) {
-				Msg.warn(this, "No structure accesses found for " + count + " samples at address " + baseAddress);
+			this.samples += count;
+			if (!pattern.isEmpty()) {
+				this.attributed += count;
 			}
 
 			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
@@ -904,6 +908,13 @@ class AccessPatterns {
 				this.functions.put(accessPattern, this.listing.getFunctionContaining(baseAddress));
 			}
 		}
+	}
+
+	/**
+	 * @return The fraction of samples that we found an access pattern for.
+	 */
+	double getHitRate() {
+		return (double) this.attributed / this.samples;
 	}
 
 	/**
