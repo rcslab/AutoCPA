@@ -21,10 +21,6 @@ cat_or_kldstat() {
     fi
 }
 
-cat_or_kldstat "$3" | while read id refs address size name; do
-    if [ "$address" = "Address" ]; then
-        continue
-    fi
-
-    $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL/$name" -loader ElfLoader -loader-imagebase "$address" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -postScript DWARF_ExtractorScript.java
+cat_or_kldstat "$3" | tail -n+2 | while read id refs address size name; do
+    $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL/$name" -processor x86:LE:64:default -cspec gcc -loader ElfLoader -loader-imagebase "$address" -max-cpu 24 -preScript DWARF_ExtractorScript.java
 done

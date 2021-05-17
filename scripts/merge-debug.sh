@@ -10,17 +10,17 @@ if [ $# -ne 3 ]; then
 fi
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}"/merge-debug.XXXXXXXXXX)"
+READELF="${READELF:-/usr/local/bin/readelf}"
 
-objcopy $(objdump -h "$2" \
-        | awk '$2~/^\.debug/' \
-        | while read idx name size vma lma off align; do
-        echo " --add-section=$name=$TMP/$name.raw"
-        {
-            # https://stackoverflow.com/a/1280828/502399
-            dd bs=1 skip=0x$off count=0 status=none
-            dd bs=4096 count=$((0x$size / 4096)) status=none
-            dd bs=$((0x$size % 4096)) count=1 status=none
-        } <"$2" >"$TMP/$name.raw"
-    done) "$1" "$3"
+objcopy --remove-section=.gnu_debuglink \
+        $(objdump -h "$2" \
+              | awk '$2~/^\.debug/' \
+              | while read idx name size vma lma off align; do
+                    $READELF --relocated-dump="$name" "$2" | awk '{ print $2 $3 $4 $5 }' | xxd -r -p >"$TMP/$name.raw"
+                    echo " --add-section=$name=$TMP/$name.raw"
+                done
+        ) \
+        "$1" \
+        "$3"
 
 rm -rf "$TMP"
