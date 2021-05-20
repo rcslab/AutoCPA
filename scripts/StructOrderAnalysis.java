@@ -66,6 +66,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Analyzes cache misses to suggest reorderings of struct fields.
@@ -764,32 +765,27 @@ class CodeBlockEdge extends DefaultGEdge<CodeBlockVertex> {
 class ControlFlowGraph {
 	private final BasicBlockModel bbModel;
 	private final TaskMonitor monitor;
+	private final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> cfg;
+	private final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> reverseCfg;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> domTree;
+	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> postDomTree;
+
+	// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
+	private final Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
 
 	ControlFlowGraph(Function function, BasicBlockModel bbModel, TaskMonitor monitor) throws Exception {
 		this.bbModel = bbModel;
 		this.monitor = monitor;
+		this.cfg = new JungDirectedGraph<>();
+		this.reverseCfg = new JungDirectedGraph<>();
 
 		AddressSetView body = function.getBody();
 		CodeBlockIterator blocks = bbModel.getCodeBlocksContaining(body, monitor);
 
-		// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
-		Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
-
-		// Build the control flow graph for that function.  We want all the nodes B such
-		// that all paths from A to END contain B, i.e.
-		//
-		//     {B | B postDom A}
-		//
-		// findPostDomainance(A) gets us {B | A postDom B} instead, so we have to compute it
-		// by hand.  The post-dominance relation is just the dominance relation on the
-		// transposed graph, so we orient all the edges backwards, compute the dominance
-		// tree, and walk the parents instead of the children.
-		JungDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph = new JungDirectedGraph<>();
+		// Build the forward and backward CFGs for this function
 		while (blocks.hasNext()) {
 			CodeBlock block = blocks.next();
-			CodeBlockVertex vertex = interner.computeIfAbsent(new CodeBlockVertex(block), v -> v);
-			graph.addVertex(vertex);
+			CodeBlockVertex vertex = new CodeBlockVertex(block);
 
 			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
 			while (dests.hasNext()) {
@@ -800,51 +796,60 @@ class ControlFlowGraph {
 					continue;
 				}
 
-				CodeBlockVertex destVertex = interner.computeIfAbsent(new CodeBlockVertex(destBlock), v -> v);
-				graph.addVertex(destVertex);
-				graph.addEdge(new CodeBlockEdge(destVertex, vertex));
+				addEdge(vertex, new CodeBlockVertex(destBlock));
 			}
 		}
 
-		// The function entry point is a sink, since the graph is reversed
-		CodeBlockVertex sink = new CodeBlockVertex("SINK");
-		graph.addVertex(sink);
-		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
-			CodeBlockVertex vertex = interner.computeIfAbsent(new CodeBlockVertex(block), v -> v);
-			graph.addEdge(new CodeBlockEdge(vertex, sink));
-		}
-
-		// Make sure the graph has a unique source
+		// The function entry point is the source vertex
 		CodeBlockVertex source = new CodeBlockVertex("SOURCE");
-		Set<CodeBlockVertex> sources = GraphAlgorithms.getSources(graph);
-		if (sources.isEmpty()) {
-			CodeBlockVertex vertex = findInfiniteLoopFooter(graph);
-			graph.addVertex(source);
-			graph.addEdge(new CodeBlockEdge(source, vertex));
-		} else {
-			graph.addVertex(source);
-			for (CodeBlockVertex vertex : sources) {
-				graph.addEdge(new CodeBlockEdge(source, vertex));
-			}
+		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
+			addEdge(source, new CodeBlockVertex(block));
 		}
 
-		this.domTree = GraphAlgorithms.findDominanceTree(graph, monitor);
+		// Make sure the graph has a unique sink
+		CodeBlockVertex sink = new CodeBlockVertex("SINK");
+		Set<CodeBlockVertex> sinks = GraphAlgorithms.getSinks(this.cfg);
+		if (sinks.isEmpty()) {
+			sinks = Collections.singleton(findInfiniteLoopFooter());
+		}
+		for (CodeBlockVertex vertex : sinks) {
+			addEdge(vertex, sink);
+		}
+
+		this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, monitor);
+		this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
 	}
 
 	/**
-	 * Functions that loop forever have no source nodes in the transposed
-	 * CFG.  Here we select an arbitrary node from the infinite loop to make
-	 * into the source, so that we can construct the post-dominance tree.
+	 * Add an edge to the forward and backward CFGs.
 	 */
-	static CodeBlockVertex findInfiniteLoopFooter(GDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph) {
+	private void addEdge(CodeBlockVertex from, CodeBlockVertex to) {
+		from = interner.computeIfAbsent(from, v -> v);
+		to = interner.computeIfAbsent(to, v -> v);
+
+		this.cfg.addVertex(from);
+		this.cfg.addVertex(to);
+		this.cfg.addEdge(new CodeBlockEdge(from, to));
+
+		this.reverseCfg.addVertex(to);
+		this.reverseCfg.addVertex(from);
+		this.reverseCfg.addEdge(new CodeBlockEdge(to, from));
+	}
+
+	/**
+	 * Functions that loop forever have no sink nodes in their CFG.  Here we select an arbitrary
+	 * node from the infinite loop to make into the sink, so that we can construct the post-
+	 * dominance tree.
+	 */
+	private CodeBlockVertex findInfiniteLoopFooter() {
 		// The arbirary vertex we select is the first one that has only
 		// back-edges (to previously executed blocks)
 		Set<CodeBlockVertex> seen = new HashSet<>();
-		List<CodeBlockVertex> stack = new ArrayList<>(GraphAlgorithms.getSinks(graph));
+		List<CodeBlockVertex> stack = new ArrayList<>(GraphAlgorithms.getSources(this.cfg));
 		while (!stack.isEmpty()) {
 			CodeBlockVertex vertex = stack.remove(stack.size() - 1);
 			boolean allSeen = true;
-			for (CodeBlockVertex parent : graph.getPredecessors(vertex)) {
+			for (CodeBlockVertex parent : this.cfg.getPredecessors(vertex)) {
 				if (seen.add(parent)) {
 					allSeen = false;
 					stack.add(parent);
@@ -859,22 +864,50 @@ class ControlFlowGraph {
 	}
 
 	/**
-	 * Get the basic blocks that are guaranteed to be reached from the given address.
+	 * Get the basic blocks that are definitely reached after the given blocks.
 	 */
-	Set<CodeBlock> definitelyReachedBlocks(Address address) throws Exception {
-		List<CodeBlockVertex> sources = new ArrayList<>();
+	private Set<CodeBlockVertex> getDefiniteSuccessors(Collection<CodeBlockVertex> blocks) throws Exception {
+		// We want all the nodes B such that all paths from A to END contain B, i.e.
+		//
+		//     {B | B postDom A}
+		//
+		// findPostDomainance(A) gets us {B | A postDom B} instead, so we have to compute it
+		// by hand.  The post-dominance relation is just the dominance relation on the
+		// transposed graph, so we use the dominance tree of the reversed CFG, and walk the
+		// parents instead of the children.
+		return GraphAlgorithms.getAncestors(this.postDomTree, blocks);
+	}
+
+	/**
+	 * Get the basic blocks that are definitely reached before the given block.
+	 */
+	private Set<CodeBlockVertex> getDefinitePredecessors(List<CodeBlockVertex> blocks) throws Exception {
+		return GraphAlgorithms.getAncestors(this.domTree, blocks);
+	}
+
+	/**
+	 * Get the basic blocks that are likely executed when the given address reached.
+	 */
+	Set<CodeBlock> getLikelyReachedBlocks(Address address) throws Exception {
+		List<CodeBlockVertex> containing = new ArrayList<>();
 		for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, this.monitor)) {
-			sources.add(new CodeBlockVertex(block));
+			containing.add(new CodeBlockVertex(block));
 		}
 
-		Set<CodeBlock> blocks = new HashSet<>();
-		for (CodeBlockVertex vertex : GraphAlgorithms.getAncestors(this.domTree, sources)) {
-			CodeBlock block = vertex.getCodeBlock();
-			if (block != null) {
-				blocks.add(block);
-			}
+		Set<CodeBlockVertex> vertices = new HashSet<>(containing);
+		if (!Util.checkEnv("BCPI_NO_FORWARD_FLOW")) {
+			vertices.addAll(getDefiniteSuccessors(containing));
 		}
-		return blocks;
+		if (!Util.checkEnv("BCPI_NO_BACKWARD_FLOW")) {
+			vertices.addAll(getDefinitePredecessors(containing));
+		}
+
+		// TODO: Compute likely reached blocks as well
+
+		return vertices.stream()
+			.map(CodeBlockVertex::getCodeBlock)
+			.filter(Objects::nonNull)
+			.collect(Collectors.toSet());
 	}
 }
 
@@ -967,7 +1000,7 @@ class AccessPatterns {
 			this.cfgs.put(function, cfg);
 		}
 
-		return cfg.definitelyReachedBlocks(address);
+		return cfg.getLikelyReachedBlocks(address);
 	}
 
 	/**
@@ -1180,5 +1213,18 @@ class Bucket {
 		}
 
 		return size;
+	}
+}
+
+/**
+ * Static utility methods.
+ */
+class Util {
+	/**
+	 * Check if a setting has been enabled through an environment variable.
+	 */
+	static boolean checkEnv(String var) {
+		String value = System.getenv(var);
+		return value != null && !value.isEmpty();
 	}
 }
