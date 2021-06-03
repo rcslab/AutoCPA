@@ -813,11 +813,22 @@ class ControlFlowGraph {
 			sinks = Collections.singleton(findInfiniteLoopFooter());
 		}
 		for (CodeBlockVertex vertex : sinks) {
-			addEdge(vertex, sink);
+			if (vertex == source) {
+				System.out.println(GraphAlgorithms.getSinks(this.cfg));
+				System.out.println(sinks);
+			} else
+				addEdge(vertex, sink);
 		}
 
 		this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, monitor);
-		this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
+		try {
+			this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
+		} catch (Throwable t) {
+			System.out.println(this.reverseCfg);
+			System.out.println("Sources: " + GraphAlgorithms.getSources(this.reverseCfg));
+			System.out.println("Sinks:   " + GraphAlgorithms.getSinks(this.reverseCfg));
+			throw t;
+		}
 	}
 
 	/**
@@ -844,15 +855,15 @@ class ControlFlowGraph {
 	private CodeBlockVertex findInfiniteLoopFooter() {
 		// The arbirary vertex we select is the first one that has only
 		// back-edges (to previously executed blocks)
-		Set<CodeBlockVertex> seen = new HashSet<>();
 		List<CodeBlockVertex> stack = new ArrayList<>(GraphAlgorithms.getSources(this.cfg));
+		Set<CodeBlockVertex> seen = new HashSet<>(stack);
 		while (!stack.isEmpty()) {
 			CodeBlockVertex vertex = stack.remove(stack.size() - 1);
 			boolean allSeen = true;
-			for (CodeBlockVertex parent : this.cfg.getPredecessors(vertex)) {
-				if (seen.add(parent)) {
+			for (CodeBlockVertex child : this.cfg.getSuccessors(vertex)) {
+				if (seen.add(child)) {
 					allSeen = false;
-					stack.add(parent);
+					stack.add(child);
 				}
 			}
 			if (allSeen) {
