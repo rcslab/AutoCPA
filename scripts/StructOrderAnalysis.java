@@ -1113,7 +1113,7 @@ class AccessPatterns {
 				int start = 0;
 				int end = 0;
 				for (DataTypeComponent optField : struct.getComponents()) {
-					if (field.getFieldName().equals(optField.getFieldName())) {
+					if (Objects.equals(field.getFieldName(), optField.getFieldName())) {
 						start = optField.getOffset();
 						end = optField.getEndOffset();
 						break;
