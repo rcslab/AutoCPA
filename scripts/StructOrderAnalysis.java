@@ -808,16 +808,9 @@ class ControlFlowGraph {
 
 		// Make sure the graph has a unique sink
 		CodeBlockVertex sink = new CodeBlockVertex("SINK");
-		Set<CodeBlockVertex> sinks = GraphAlgorithms.getSinks(this.cfg);
-		if (sinks.isEmpty()) {
-			sinks = Collections.singleton(findInfiniteLoopFooter());
-		}
+		Set<CodeBlockVertex> sinks = findSinksAndLoops();
 		for (CodeBlockVertex vertex : sinks) {
-			if (vertex == source) {
-				System.out.println(GraphAlgorithms.getSinks(this.cfg));
-				System.out.println(sinks);
-			} else
-				addEdge(vertex, sink);
+			addEdge(vertex, sink);
 		}
 
 		this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, monitor);
@@ -848,30 +841,37 @@ class ControlFlowGraph {
 	}
 
 	/**
-	 * Functions that loop forever have no sink nodes in their CFG.  Here we select an arbitrary
-	 * node from the infinite loop to make into the sink, so that we can construct the post-
-	 * dominance tree.
+	 * Infinite loops in the CFG do not reach the sink node, making us fail to construct the
+	 * post-dominator tree.  This function finds the "last" node in every infinite loop so we
+	 * can connect it to the sink.
 	 */
-	private CodeBlockVertex findInfiniteLoopFooter() {
-		// The arbirary vertex we select is the first one that has only
-		// back-edges (to previously executed blocks)
-		List<CodeBlockVertex> stack = new ArrayList<>(GraphAlgorithms.getSources(this.cfg));
-		Set<CodeBlockVertex> seen = new HashSet<>(stack);
-		while (!stack.isEmpty()) {
-			CodeBlockVertex vertex = stack.remove(stack.size() - 1);
-			boolean allSeen = true;
-			for (CodeBlockVertex child : this.cfg.getSuccessors(vertex)) {
+	private Set<CodeBlockVertex> findSinksAndLoops() {
+		Collection<CodeBlockVertex> sources = GraphAlgorithms.getSources(this.cfg);
+		Set<CodeBlockVertex> seen = new HashSet<>(sources);
+		Set<CodeBlockVertex> results = new HashSet<>();
+		for (CodeBlockVertex source : sources) {
+			findSinksAndLoops(source, new HashSet<>(), seen, results);
+		}
+		return results;
+	}
+
+	private void findSinksAndLoops(CodeBlockVertex vertex, Set<CodeBlockVertex> parents, Set<CodeBlockVertex> seen, Set<CodeBlockVertex> results) {
+		boolean backOnly = true;
+		parents.add(vertex);
+
+		for (CodeBlockVertex child : this.cfg.getSuccessors(vertex)) {
+			if (!parents.contains(child)) {
+				backOnly = false;
 				if (seen.add(child)) {
-					allSeen = false;
-					stack.add(child);
+					findSinksAndLoops(child, parents, seen, results);
 				}
 			}
-			if (allSeen) {
-				return vertex;
-			}
 		}
+		parents.remove(vertex);
 
-		throw new RuntimeException("Could not find a back-edge in an infinitely looping function");
+		if (backOnly) {
+			results.add(vertex);
+		}
 	}
 
 	/**
