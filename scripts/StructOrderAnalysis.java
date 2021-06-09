@@ -962,10 +962,10 @@ class ControlFlowGraph {
 		}
 
 		Set<CodeBlockVertex> vertices = new HashSet<>(containing);
-		if (!Util.checkEnv("BCPI_NO_FORWARD_FLOW")) {
+		if (Config.ANALYZE_FORWARD_FLOW) {
 			vertices.addAll(getDefiniteSuccessors(containing));
 		}
-		if (!Util.checkEnv("BCPI_NO_BACKWARD_FLOW")) {
+		if (Config.ANALYZE_BACKWARD_FLOW) {
 			vertices.addAll(getDefinitePredecessors(containing));
 		}
 
@@ -1013,8 +1013,8 @@ class AccessPatterns {
 			Set<CodeBlock> blocks = getCodeBlocksFrom(baseAddress, monitor);
 			for (CodeBlock block : blocks) {
 				for (Address address : block.getAddresses(true)) {
-					// Don't count accesses before the miss
-					if (block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
+					if (!Config.ANALYZE_BACKWARD_FLOW && block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
+						// Don't count accesses before the miss
 						continue;
 					}
 
@@ -1276,13 +1276,18 @@ class Bucket {
 }
 
 /**
- * Static utility methods.
+ * Analysis configuration.
  */
-class Util {
+class Config {
+	/** Whether to analyze control flow before samples. */
+	static boolean ANALYZE_BACKWARD_FLOW = !checkEnv("BCPI_NO_BACKWARD_FLOW");
+	/** Whether to analyze control flow after samples. */
+	static boolean ANALYZE_FORWARD_FLOW = !checkEnv("BCPI_NO_FORWARD_FLOW");
+
 	/**
 	 * Check if a setting has been enabled through an environment variable.
 	 */
-	static boolean checkEnv(String var) {
+	private static boolean checkEnv(String var) {
 		String value = System.getenv(var);
 		return value != null && !value.isEmpty();
 	}
