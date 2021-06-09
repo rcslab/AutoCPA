@@ -19,4 +19,4 @@ if [ ! -e "$PROJ/$SHORT.gpr" ]; then
 fi
 
 shift 3
-$GHIDRA_HEADLESS "$PROJ" "$SHORT" -process -recursive -processor x86:LE:64:default -max-cpu 24 -cspec gcc -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$CSV" "$@"
+$GHIDRA_HEADLESS "$PROJ" "$SHORT" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -noanalysis -scriptPath "$ROOT/scripts" -postScript StructOrderAnalysis.java "$CSV" "$@"
