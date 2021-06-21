@@ -87,10 +87,10 @@ public class StructOrderAnalysis extends GhidraScript {
 		// Get the decompilation of each function containing an address
 		// for which we have data.  This is much faster than calling
 		// DataTypeReferenceFinder once per field.
+		SetMultimap<Program, Function> funcs = data.getRelevantFunctions(programs, this.monitor);
 		FieldReferences refs = new FieldReferences();
 		for (Program program : programs) {
-			Set<Function> functions = data.getRelevantFunctions(program);
-			refs.collect(program, functions, this.monitor);
+			refs.collect(program, funcs.get(program), this.monitor);
 		}
 
 		// Use our collected data to infer field access patterns
@@ -461,14 +461,22 @@ class BcpiData {
 	/**
 	 * @return All the functions that contain an address for which we have data.
 	 */
-	Set<Function> getRelevantFunctions(Program program) {
-		Set<Function> functions = new HashSet<>();
+	SetMultimap<Program, Function> getRelevantFunctions(Collection<Program> programs, TaskMonitor monitor) {
+		SetMultimap<Program, Function> funcs = HashMultimap.create();
 		for (BcpiRow row : this.rows.values()) {
-			if (row.program.equals(program)) {
-				functions.add(row.function);
+			if (programs.contains(row.program)) {
+				addFunction(funcs, row.function, 0, monitor);
 			}
 		}
-		return functions;
+		return funcs;
+	}
+
+	void addFunction(SetMultimap<Program, Function> funcs, Function func, int depth, TaskMonitor monitor) {
+		if (funcs.put(func.getProgram(), func) && depth < Config.IPA_DEPTH) {
+			for (Function callee : func.getCalledFunctions(monitor)) {
+				addFunction(funcs, callee, depth + 1, monitor);
+			}
+		}
 	}
 
 	/**
@@ -762,7 +770,7 @@ class AccessPattern {
 class CodeBlockVertex {
 	private final CodeBlock block;
 	private final String name;
-	final Object key;
+	private final Object key;
 
 	CodeBlockVertex(CodeBlock block) {
 		this.block = block;
@@ -829,8 +837,8 @@ class ControlFlowGraph {
 	// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
 	private final Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
 
-	ControlFlowGraph(Function function, BasicBlockModel bbModel, TaskMonitor monitor) throws Exception {
-		this.bbModel = bbModel;
+	ControlFlowGraph(Function function, TaskMonitor monitor) throws Exception {
+		this.bbModel = new BasicBlockModel(function.getProgram());
 		this.monitor = monitor;
 		this.cfg = new JungDirectedGraph<>();
 		this.reverseCfg = new JungDirectedGraph<>();
@@ -847,12 +855,10 @@ class ControlFlowGraph {
 			while (dests.hasNext()) {
 				CodeBlockReference dest = dests.next();
 				CodeBlock destBlock = dest.getDestinationBlock();
-				if (!body.contains(destBlock)) {
-					// Ignore non-local control flow
-					continue;
+				// Ignore non-local control flow
+				if (body.contains(destBlock)) {
+					addEdge(vertex, new CodeBlockVertex(destBlock));
 				}
-
-				addEdge(vertex, new CodeBlockVertex(destBlock));
 			}
 		}
 
@@ -870,14 +876,7 @@ class ControlFlowGraph {
 		}
 
 		this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, monitor);
-		try {
-			this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
-		} catch (Throwable t) {
-			System.out.println(this.reverseCfg);
-			System.out.println("Sources: " + GraphAlgorithms.getSources(this.reverseCfg));
-			System.out.println("Sinks:   " + GraphAlgorithms.getSinks(this.reverseCfg));
-			throw t;
-		}
+		this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
 	}
 
 	/**
@@ -1010,7 +1009,7 @@ class AccessPatterns {
 			Map<Structure, Set<DataTypeComponent>> pattern = new HashMap<>();
 			int count = this.data.getCount(baseAddress);
 
-			Set<CodeBlock> blocks = getCodeBlocksFrom(baseAddress, monitor);
+			Set<CodeBlock> blocks = getCodeBlocksThrough(baseAddress, monitor);
 			for (CodeBlock block : blocks) {
 				for (Address address : block.getAddresses(true)) {
 					if (!Config.ANALYZE_BACKWARD_FLOW && block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
@@ -1048,18 +1047,70 @@ class AccessPatterns {
 	}
 
 	/**
-	 * @return All the code blocks that flow from the given address.
+	 * @return The cached CFG for a function.
 	 */
-	private Set<CodeBlock> getCodeBlocksFrom(Address address, TaskMonitor monitor) throws Exception {
+	private ControlFlowGraph getCfg(Function function, TaskMonitor monitor) throws Exception {
+		ControlFlowGraph cfg = this.cfgs.get(function);
+		if (cfg == null) {
+			cfg = new ControlFlowGraph(function, monitor);
+			this.cfgs.put(function, cfg);
+		}
+		return cfg;
+	}
+
+	/**
+	 * @return All the code blocks that flow through the given address.
+	 */
+	private Set<CodeBlock> getCodeBlocksThrough(Address address, TaskMonitor monitor) throws Exception {
 		BcpiRow row = this.data.getRow(address);
 
-		ControlFlowGraph cfg = this.cfgs.get(row.function);
-		if (cfg == null) {
-			cfg = new ControlFlowGraph(row.function, new BasicBlockModel(row.program), monitor);
-			this.cfgs.put(row.function, cfg);
+		ControlFlowGraph cfg = getCfg(row.function, monitor);
+		Set<CodeBlock> blocks = new HashSet<>(cfg.getLikelyReachedBlocks(address));
+		Set<CodeBlock> prevBlocks = blocks;
+		for (int i = 0; i < Config.IPA_DEPTH; ++i) {
+			Set<CodeBlock> calledBlocks = getCalledBlocks(prevBlocks, monitor);
+			blocks.addAll(calledBlocks);
+			prevBlocks = calledBlocks;
 		}
 
-		return cfg.getLikelyReachedBlocks(address);
+		return blocks;
+	}
+
+	/**
+	 * @return All the code blocks that are reached by function calls from the given blocks.
+	 */
+	private Set<CodeBlock> getCalledBlocks(Set<CodeBlock> blocks, TaskMonitor monitor) throws Exception {
+		Set<CodeBlock> result = new HashSet<>();
+
+		for (CodeBlock block : blocks) {
+			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
+			while (dests.hasNext()) {
+				CodeBlockReference dest = dests.next();
+				if (!dest.getFlowType().isCall()) {
+					continue;
+				}
+
+				CodeBlock destBlock = dest.getDestinationBlock();
+				Address address = destBlock.getMinAddress();
+				Function function = destBlock.getModel().getProgram().getListing().getFunctionContaining(address);
+				if (function != null && function.isThunk()) {
+					function = function.getThunkedFunction(true);
+				}
+				if (function == null) {
+					continue;
+				}
+
+				long size = function.getBody().getNumAddresses();
+				if (size <= 0 || size >= Config.MAX_INLINE_SIZE) {
+					continue;
+				}
+
+				ControlFlowGraph cfg = getCfg(function, monitor);
+				result.addAll(cfg.getLikelyReachedBlocks(address));
+			}
+		}
+
+		return result;
 	}
 
 	/**
@@ -1283,6 +1334,10 @@ class Config {
 	static boolean ANALYZE_BACKWARD_FLOW = !checkEnv("BCPI_NO_BACKWARD_FLOW");
 	/** Whether to analyze control flow after samples. */
 	static boolean ANALYZE_FORWARD_FLOW = !checkEnv("BCPI_NO_FORWARD_FLOW");
+	/** Inter-procedural analysis depth. */
+	static int IPA_DEPTH = intEnv("BCPI_IPA_DEPTH", 1);
+	/** Maximum function size for IPA. */
+	static int MAX_INLINE_SIZE = intEnv("BCPI_MAX_INLINE_SIZE", 1024);
 
 	/**
 	 * Check if a setting has been enabled through an environment variable.
@@ -1290,5 +1345,17 @@ class Config {
 	private static boolean checkEnv(String var) {
 		String value = System.getenv(var);
 		return value != null && !value.isEmpty();
+	}
+
+	/**
+	 * Get an integer value from the environment.
+	 */
+	private static int intEnv(String var, int def) {
+		String value = System.getenv(var);
+		if (value != null && !value.isEmpty()) {
+			return Integer.parseInt(value);
+		} else {
+			return def;
+		}
 	}
 }
