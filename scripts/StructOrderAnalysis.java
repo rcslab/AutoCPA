@@ -1,3 +1,5 @@
+import bcpi.AccessPattern;
+import bcpi.AccessPatterns;
 import bcpi.BcpiConfig;
 import bcpi.BcpiData;
 import bcpi.BcpiDataRow;
@@ -8,34 +10,21 @@ import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressSetView;
-import ghidra.program.model.block.CodeBlock;
-import ghidra.program.model.block.CodeBlockIterator;
-import ghidra.program.model.block.CodeBlockReference;
-import ghidra.program.model.block.CodeBlockReferenceIterator;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DefaultDataType;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.listing.Function;
-import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Multiset;
-import com.google.common.collect.Multisets;
 import com.google.common.collect.SetMultimap;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -120,8 +109,8 @@ public class StructOrderAnalysis extends GhidraScript {
 				nPatterns += 1;
 			}
 
-			int before = patterns.score(struct, struct);
-			int after = patterns.score(struct, patterns.optimize(struct));
+			int before = CostModel.score(patterns, struct, struct);
+			int after = CostModel.score(patterns, struct, CostModel.optimize(patterns, struct));
 			rows.add(new SummaryRow(struct, nSamples, nPatterns, before - after));
 		}
 
@@ -161,11 +150,11 @@ public class StructOrderAnalysis extends GhidraScript {
 			}
 
 			printOriginal(patterns, struct);
-			int before = patterns.score(struct, struct);
+			int before = CostModel.score(patterns, struct, struct);
 
-			Structure optimized = patterns.optimize(struct);
+			Structure optimized = CostModel.optimize(patterns, struct);
 			printOptimized(optimized);
-			int after = patterns.score(struct, optimized);
+			int after = CostModel.score(patterns, struct, optimized);
 
 			System.out.format("Improvement: %d (before: %d, after: %d)\n", before - after, before, after);
 
@@ -378,312 +367,6 @@ class Table {
 }
 
 /**
- * A set of fields accessed in a block.
- */
-class AccessPattern {
-	private final Set<DataTypeComponent> fields;
-
-	AccessPattern(Set<DataTypeComponent> fields) {
-		this.fields = ImmutableSet.copyOf(fields);
-	}
-
-	Set<DataTypeComponent> getFields() {
-		return this.fields;
-	}
-
-	@Override
-	public String toString() {
-		StringBuilder result = new StringBuilder();
-
-		DataType struct = null;
-		for (DataTypeComponent field : this.fields) {
-			if (struct == null) {
-				struct = field.getParent();
-				result.append(struct.getName())
-					.append("::{");
-			} else {
-				result.append(", ");
-			}
-			result.append(field.getFieldName());
-		}
-
-		return result
-			.append("}")
-			.toString();
-	}
-
-	@Override
-	public boolean equals(Object obj) {
-		if (obj == this) {
-			return true;
-		} else if (!(obj instanceof AccessPattern)) {
-			return false;
-		}
-
-		AccessPattern other = (AccessPattern) obj;
-		return this.fields.equals(other.fields);
-	}
-
-	@Override
-	public int hashCode() {
-		return Objects.hash(fields);
-	}
-}
-
-/**
- * Struct field access patterns.
- */
-class AccessPatterns {
-	// Stores the access patterns for each struct
-	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
-	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
-	private final Map<Function, ControlFlowGraph> cfgs = new HashMap<>();
-	private final BcpiData data;
-	private final FieldReferences refs;
-	private long samples = 0;
-	private long attributed = 0;
-
-	private AccessPatterns(BcpiData data, FieldReferences refs) {
-		this.data = data;
-		this.refs = refs;
-	}
-
-	/**
-	 * Infer access patterns from the collected data.
-	 */
-	static AccessPatterns collect(BcpiData data, FieldReferences refs, TaskMonitor monitor) throws Exception {
-		AccessPatterns patterns = new AccessPatterns(data, refs);
-		patterns.collect(monitor);
-		return patterns;
-	}
-
-	private void collect(TaskMonitor monitor) throws Exception {
-		for (Address baseAddress : this.data.getAddresses()) {
-			Map<Structure, Set<DataTypeComponent>> pattern = new HashMap<>();
-			int count = this.data.getCount(baseAddress);
-
-			Set<CodeBlock> blocks = getCodeBlocksThrough(baseAddress, monitor);
-			for (CodeBlock block : blocks) {
-				for (Address address : block.getAddresses(true)) {
-					if (!BcpiConfig.ANALYZE_BACKWARD_FLOW && block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
-						// Don't count accesses before the miss
-						continue;
-					}
-
-					for (DataTypeComponent field : this.refs.getFields(address)) {
-						Structure struct = (Structure) field.getParent();
-						pattern.computeIfAbsent(struct, k -> new HashSet<>())
-							.add(field);
-					}
-				}
-			}
-
-			this.samples += count;
-			if (!pattern.isEmpty()) {
-				this.attributed += count;
-			}
-
-			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
-				AccessPattern accessPattern = new AccessPattern(entry.getValue());
-				this.patterns.computeIfAbsent(entry.getKey(), k -> HashMultiset.create())
-					.add(accessPattern, count);
-				this.functions.put(accessPattern, this.data.getRow(baseAddress).function);
-			}
-		}
-	}
-
-	/**
-	 * @return The fraction of samples that we found an access pattern for.
-	 */
-	double getHitRate() {
-		return (double) this.attributed / this.samples;
-	}
-
-	/**
-	 * @return The cached CFG for a function.
-	 */
-	private ControlFlowGraph getCfg(Function function, TaskMonitor monitor) throws Exception {
-		ControlFlowGraph cfg = this.cfgs.get(function);
-		if (cfg == null) {
-			cfg = new ControlFlowGraph(function, monitor);
-			this.cfgs.put(function, cfg);
-		}
-		return cfg;
-	}
-
-	/**
-	 * @return All the code blocks that flow through the given address.
-	 */
-	private Set<CodeBlock> getCodeBlocksThrough(Address address, TaskMonitor monitor) throws Exception {
-		BcpiDataRow row = this.data.getRow(address);
-
-		ControlFlowGraph cfg = getCfg(row.function, monitor);
-		Set<CodeBlock> blocks = new HashSet<>(cfg.getLikelyReachedBlocks(address));
-		Set<CodeBlock> prevBlocks = blocks;
-		for (int i = 0; i < BcpiConfig.IPA_DEPTH; ++i) {
-			Set<CodeBlock> calledBlocks = getCalledBlocks(prevBlocks, monitor);
-			blocks.addAll(calledBlocks);
-			prevBlocks = calledBlocks;
-		}
-
-		return blocks;
-	}
-
-	/**
-	 * @return All the code blocks that are reached by function calls from the given blocks.
-	 */
-	private Set<CodeBlock> getCalledBlocks(Set<CodeBlock> blocks, TaskMonitor monitor) throws Exception {
-		Set<CodeBlock> result = new HashSet<>();
-
-		for (CodeBlock block : blocks) {
-			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
-			while (dests.hasNext()) {
-				CodeBlockReference dest = dests.next();
-				if (!dest.getFlowType().isCall()) {
-					continue;
-				}
-
-				CodeBlock destBlock = dest.getDestinationBlock();
-				Address address = destBlock.getMinAddress();
-				Function function = destBlock.getModel().getProgram().getListing().getFunctionContaining(address);
-				if (function != null && function.isThunk()) {
-					function = function.getThunkedFunction(true);
-				}
-				if (function == null) {
-					continue;
-				}
-
-				long size = function.getBody().getNumAddresses();
-				if (size <= 0 || size >= BcpiConfig.MAX_INLINE_SIZE) {
-					continue;
-				}
-
-				ControlFlowGraph cfg = getCfg(function, monitor);
-				result.addAll(cfg.getLikelyReachedBlocks(address));
-			}
-		}
-
-		return result;
-	}
-
-	/**
-	 * @return All the structures about which we have data.
-	 */
-	Set<Structure> getStructures() {
-		return Collections.unmodifiableSet(this.patterns.keySet());
-	}
-
-	/**
-	 * @return All the access patterns we saw for a structure, from most to least often.
-	 */
-	Set<AccessPattern> getPatterns(Structure struct) {
-		return ImmutableSet.copyOf(
-			Multisets.copyHighestCountFirst(this.patterns.get(struct))
-				.elementSet()
-		);
-	}
-
-	/**
-	 * @return The total number of accesses to a struct.
-	 */
-	int getCount(Structure struct) {
-		return this.patterns.get(struct).size();
-	}
-
-	/**
-	 * @return The number of occurrences of an access pattern.
-	 */
-	int getCount(Structure struct, AccessPattern pattern) {
-		return this.patterns.get(struct).count(pattern);
-	}
-
-	/**
-	 * @return The number of accesses we have to this field.
-	 */
-	private int getCount(DataTypeComponent field) {
-		int count = 0;
-		Multiset<AccessPattern> patterns = this.patterns.get(field.getParent());
-		if (patterns != null) {
-			for (Multiset.Entry<AccessPattern> entry : patterns.entrySet()) {
-				if (entry.getElement().getFields().contains(field)) {
-					count += entry.getCount();
-				}
-			}
-		}
-		return count;
-	}
-
-	/**
-	 * @return The functions which had the given access pattern.
-	 */
-	Set<Function> getFunctions(AccessPattern pattern) {
-		return Collections.unmodifiableSet(this.functions.get(pattern));
-	}
-
-	/**
-	 * Optimize the layout of a struct according to its access pattern.
-	 */
-	Structure optimize(Structure struct) {
-		Set<DataTypeComponent> added = new HashSet<>();
-		List<Bucket> buckets = new ArrayList<>();
-
-		// Pack the most common access patterns first
-		for (AccessPattern pattern : getPatterns(struct)) {
-			Set<DataTypeComponent> fields = new HashSet<>(pattern.getFields());
-			fields.removeAll(added);
-			Bucket.pack(buckets, fields);
-			added.addAll(fields);
-		}
-
-		// Add any missing fields we didn't see get accessed
-		for (DataTypeComponent field : struct.getComponents()) {
-			// Skip padding
-			if (!field.getDataType().equals(DefaultDataType.dataType) && !added.contains(field)) {
-				Bucket.pack(buckets, field);
-			}
-		}
-
-		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
-		for (Bucket bucket : buckets) {
-			for (DataTypeComponent field : bucket.getFields()) {
-				optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
-			}
-		}
-		return optimized;
-	}
-
-	/**
-	 * Compute the cost of a structure reordering in our simple cache model.
-	 */
-	int score(Structure original, Structure struct) {
-		int score = 0;
-
-		for (AccessPattern pattern : getPatterns(original)) {
-			Set<Integer> cacheLines = new HashSet<>();
-
-			for (DataTypeComponent field : pattern.getFields()) {
-				int start = 0;
-				int end = 0;
-				for (DataTypeComponent optField : struct.getComponents()) {
-					if (Objects.equals(field.getFieldName(), optField.getFieldName())) {
-						start = optField.getOffset();
-						end = optField.getEndOffset();
-						break;
-					}
-				}
-				for (int i = start / 64; i <= (end - 1) / 64; ++i) {
-					cacheLines.add(i);
-				}
-			}
-
-			score += getCount(original, pattern) * cacheLines.size();
-		}
-
-		return score;
-	}
-}
-
-/**
  * A bucket of fields for structure optimization.
  */
 class Bucket {
@@ -776,5 +459,72 @@ class Bucket {
 		}
 
 		return size;
+	}
+}
+
+/**
+ * The simplified cost model for our suggested optimizations.
+ */
+class CostModel {
+	/**
+	 * Optimize the layout of a struct according to its access pattern.
+	 */
+	static Structure optimize(AccessPatterns patterns, Structure struct) {
+		Set<DataTypeComponent> added = new HashSet<>();
+		List<Bucket> buckets = new ArrayList<>();
+
+		// Pack the most common access patterns first
+		for (AccessPattern pattern : patterns.getPatterns(struct)) {
+			Set<DataTypeComponent> fields = new HashSet<>(pattern.getFields());
+			fields.removeAll(added);
+			Bucket.pack(buckets, fields);
+			added.addAll(fields);
+		}
+
+		// Add any missing fields we didn't see get accessed
+		for (DataTypeComponent field : struct.getComponents()) {
+			// Skip padding
+			if (!field.getDataType().equals(DefaultDataType.dataType) && !added.contains(field)) {
+				Bucket.pack(buckets, field);
+			}
+		}
+
+		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
+		for (Bucket bucket : buckets) {
+			for (DataTypeComponent field : bucket.getFields()) {
+				optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
+			}
+		}
+		return optimized;
+	}
+
+	/**
+	 * Compute the cost of a structure reordering in our simple cache model.
+	 */
+	static int score(AccessPatterns patterns, Structure original, Structure struct) {
+		int score = 0;
+
+		for (AccessPattern pattern : patterns.getPatterns(original)) {
+			Set<Integer> cacheLines = new HashSet<>();
+
+			for (DataTypeComponent field : pattern.getFields()) {
+				int start = 0;
+				int end = 0;
+				for (DataTypeComponent optField : struct.getComponents()) {
+					if (Objects.equals(field.getFieldName(), optField.getFieldName())) {
+						start = optField.getOffset();
+						end = optField.getEndOffset();
+						break;
+					}
+				}
+				for (int i = start / 64; i <= (end - 1) / 64; ++i) {
+					cacheLines.add(i);
+				}
+			}
+
+			score += patterns.getCount(original, pattern) * cacheLines.size();
+		}
+
+		return score;
 	}
 }
