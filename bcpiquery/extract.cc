@@ -187,10 +187,102 @@ util_process(util_query_parameter &u)
 			printf("* %ld: %lx (%s) ", value,
 			    get_revised_addr(n->object->path, n->node_address),
 			    n->object->path.c_str());
-		fprintf(f, "%ld,%lx\n", value,
-		    get_revised_addr(n->object->path, n->node_address));
+		fprintf(f, "%lx,%s=%ld\n",
+		    get_revised_addr(n->object->path, n->node_address),
+		    u.counter_name, value);
 		if (verbose)
 			bcpi_show_node_info(&records[0], n, u.counter_name);
+	}
+	printf("Found %d nodes\n", traverse_node);
+
+	if (fclose(f)) {
+		perror("fclose");
+	}
+}
+
+void
+util_process_all(util_query_parameter &u)
+{
+	std::vector<bcpi_node *> nodes;
+	std::vector<bcpi_record> records;
+	bcpi_record record;
+
+	for (size_t i = 0; i < u.files.size(); i++) {
+		std::vector<bcpi_object *> objects;
+		auto &record = records.emplace_back();
+
+		if (bcpi_load_file(u.files[i].c_str(), &record) < 0) {
+			fprintf(stderr, "Failed to load bcpi file '%s'\n",
+			    u.files[i].c_str());
+		}
+
+		if (verbose)
+			bcpi_print_summary(record);
+
+		if (i > 0) {
+			/*
+			 * XXX: For now we only support collected data across
+			 * files with matching counter indicies.
+			 */
+			for (int c = 0; c < records[0].counters.size(); c++) {
+				if (record.counters[c] !=
+				    records[0].counters[c]) {
+					fprintf(stderr,
+					    "KNOWN BUG: Unsupported scanning across files with different counter indicies\n");
+					exit(EX_USAGE);
+				}
+			}
+		}
+
+		if (u.object_name) {
+			bcpi_collect_object(&record, objects, u.object_name);
+			// here only the objects that we are interested in are
+			// loaded into objects
+			for (auto o : objects) {
+				bcpi_collect_node_from_object(
+				    &record, nodes, o);
+			}
+		} else {
+			bcpi_collect_node(&record, nodes);
+		}
+	}
+
+	// call node merge here
+	nodes = vec2hash_merge_nodes(nodes);
+	bcpi_node_sort(nodes);
+	int traverse_node;
+
+	FILE *f = fopen(outfile.c_str(), "w");
+	if (!f) {
+		perror("fopen");
+		exit(EX_OSERR);
+	}
+
+	traverse_node = std::min(u.top_n_node, nodes.size());
+
+	for (size_t i = 0; i < traverse_node; ++i) {
+		bool hascount = false;
+		bcpi_node *n = nodes[i];
+
+		for (int c = 0; c < records[0].counters.size(); c++) {
+			if (n->terminal_counters[c])
+				hascount = true;
+		}
+
+		// Nodes generated because of the callgraph
+		if (!hascount)
+			continue;
+
+		// Print CSV formatted samples per address
+		fprintf(f, "%lx,",
+		    get_revised_addr(n->object->path, n->node_address));
+		for (int c = 0; c < records[0].counters.size(); c++) {
+			if (n->terminal_counters[c])
+				fprintf(f, "%s=%ld,",
+				    records[0].counters[c].c_str(),
+				    n->terminal_counters[c]);
+		}
+		fprintf(f, "\n");
 	}
 	printf("Found %d nodes\n", traverse_node);
 
@@ -203,14 +295,14 @@ void
 extract_usage()
 {
 	fprintf(stderr,
-	    "Usage: bcpiquery extract -c COUNTER [OPTIONS]\n"
+	    "Usage: bcpiquery extract [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
 	    "\t-n n -- Show top n nodes\n"
 	    "\t-d d -- Traverse up to d levels deep\n"
 	    "\t-e e -- Show top e edges\n"
 	    "\t-o o -- Only show object at o\n"
-	    "\t-c c -- Show callchain concerning counter name c\n"
+	    "\t-c c -- Select one counter name c\n"
 	    "\t-k file -- Compute checksum of file\n"
 	    "\t-f name -- Process file with name\n");
 	fprintf(stderr, "\t-p path -- Path to bcpid files (default: %s)\n",
@@ -296,8 +388,7 @@ extract_cmd(int argc, char **argv)
 		}
 	}
 
-	if ((argc == 1) || (u.counter_name == nullptr)) {
-		fprintf(stderr, "You must specify a counter name!\n");
+	if (argc == 1) {
 		extract_usage();
 		return (EX_OK);
 	}
@@ -312,7 +403,10 @@ extract_cmd(int argc, char **argv)
 		exit(EX_USAGE);
 	}
 
-	util_process(u);
+	if (u.counter_name)
+		util_process(u);
+	else
+		util_process_all(u);
 
 	return (EX_OK);
 }

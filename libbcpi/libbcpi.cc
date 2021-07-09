@@ -1010,6 +1010,12 @@ bcpi_node_sort_function(const bcpi_node *a, const bcpi_node *b)
 }
 
 bool
+bcpi_node_sort_addr_function(const bcpi_node *a, const bcpi_node *b)
+{
+	return a->node_address < b->node_address;
+}
+
+bool
 bcpi_edge_sort_function(const bcpi_edge *a, const bcpi_edge *b)
 {
 	return a->counters[g_bcpi_sort_index] > b->counters[g_bcpi_sort_index];
@@ -1064,6 +1070,13 @@ bcpi_node_sort(int index, std::vector<bcpi_node *> &sorted_nodes)
 {
 	g_bcpi_sort_index = index;
 	sort(sorted_nodes.begin(), sorted_nodes.end(), bcpi_node_sort_function);
+}
+
+void
+bcpi_node_sort(std::vector<bcpi_node *> &sorted_nodes)
+{
+	sort(sorted_nodes.begin(), sorted_nodes.end(),
+	    bcpi_node_sort_addr_function);
 }
 
 void
@@ -1169,6 +1182,26 @@ hash2vec(std::unordered_map<uint64_t, bcpi_node *> umap)
 		// dec<<itr->second->terminal_counters[0] << endl;
 	}
 	return new_nodes;
+}
+
+std::vector<bcpi_node *>
+vec2hash_merge_nodes(std::vector<bcpi_node *> nodes)
+{
+	std::unordered_map<uint64_t, bcpi_node *> umap;
+
+	for (int i = 0; i < nodes.size(); i++) {
+		if (umap.find(nodes[i]->node_address) == umap.end()) {
+			umap.emplace(nodes[i]->node_address, nodes[i]);
+		} else {
+			for (int c = 0; c < BCPI_MAX_NUM_COUNTER; c++) {
+				umap[nodes[i]->node_address]
+				    ->terminal_counters[c] +=
+				    nodes[i]->terminal_counters[c];
+			}
+		}
+	}
+
+	return hash2vec(umap);
 }
 
 std::vector<bcpi_node *>

@@ -80,7 +80,8 @@ void bcpi_show_node_info(
 
 void bcpi_collect_edge(bcpi_node *n, std::vector<bcpi_edge *> &edge_out);
 void bcpi_collect_node(bcpi_record *record, std::vector<bcpi_node *> &node_out);
-void bcpi_node_sort(int, std::vector<bcpi_node *> &sorted_nodes);
+void bcpi_node_sort(int index, std::vector<bcpi_node *> &sorted_nodes);
+void bcpi_node_sort(std::vector<bcpi_node *> &sorted_nodes);
 void bcpi_edge_sort(int index, std::vector<bcpi_edge *> &sorted_edges);
 
 void bcpi_collect_object(bcpi_record *record,
@@ -92,6 +93,6 @@ void bcpi_collect_node_from_object(
 std::vector<bcpi_node *> hash2vec(
     std::unordered_map<uint64_t, bcpi_node *> umap);
 
+std::vector<bcpi_node *> vec2hash_merge_nodes(std::vector<bcpi_node *> nodes);
 std::vector<bcpi_node *> vec2hash_merge_nodes(
     int index, std::vector<bcpi_node *> nodes);
-

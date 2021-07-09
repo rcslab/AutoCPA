@@ -42,10 +42,11 @@ public class BcpiData {
 			String line = null;
 			while ((line = reader.readLine()) != null) {
 				String values[] = line.split(",");
-				int count = Integer.parseInt(values[0]);
+				String kv[] = values[1].split("=");
+				int count = Integer.parseInt(kv[1]);
 
 				for (Program program : programs) {
-					Address address = program.getAddressFactory().getAddress(values[1]);
+					Address address = program.getAddressFactory().getAddress(values[0]);
 					if (address == null) {
 						continue;
 					}

@@ -20,11 +20,11 @@ std::vector<std::string>
 util_filter_files(struct util_file_filter *u)
 {
 	time_t begin_time, end_time;
-	struct tm t {
-	};
+	struct tm t;
 	std::vector<std::string> files;
 
 	if (u->filter_begin != "") {
+		memset(&t, 0, sizeof(t));
 		if (strptime(u->filter_begin.c_str(), "%F_%T", &t) == nullptr) {
 			fprintf(stderr,
 			    "Failed to parse start time YYYY-MM-DD_HH:MM:SS\n");
@@ -33,6 +33,7 @@ util_filter_files(struct util_file_filter *u)
 		begin_time = mktime(&t);
 	}
 	if (u->filter_end != "") {
+		memset(&t, 0, sizeof(t));
 		if (strptime(u->filter_end.c_str(), "%F_%T", &t) == nullptr) {
 			fprintf(stderr,
 			    "Failed to parse start time YYYY-MM-DD_HH:MM:SS\n");
@@ -64,6 +65,7 @@ util_filter_files(struct util_file_filter *u)
 		if (u->filter_hostname != "" && u->filter_hostname != hostname)
 			continue;
 
+		memset(&t, 0, sizeof(t));
 		if (strptime(date.c_str(), "%F_%T", &t) == nullptr) {
 			fprintf(stderr,
 			    "Unable to parse the time for file '%s'\n",
@@ -76,6 +78,7 @@ util_filter_files(struct util_file_filter *u)
 			continue;
 		if (u->filter_end != "" && end_time < file_time)
 			continue;
+		printf("%s\n", filename.c_str());
 
 		files.push_back(p.path());
 		if (u->verbose)
