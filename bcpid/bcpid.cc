@@ -100,6 +100,7 @@ struct bcpid_pmc_counter {
 	bool is_valid;
 	uint64_t hits;
 	std::string name;
+	std::string label;
 	int sample_rate;
 };
 
@@ -601,7 +602,7 @@ bcpid_save(bcpid *b)
 			continue;
 		}
 
-		record.counters.emplace_back(ctr->name);
+		record.counters.emplace_back(ctr->label);
 		index_mapping[name_index] = i;
 		++name_index;
 	}
@@ -1166,6 +1167,7 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 
 	ctr->hits = 0;
 	ctr->sample_rate = (count == -1) ? b->default_count : count;
+	ctr->label = "";
 
 	auto vname = string_split(name, ",");
 	for (auto p = vname.begin(); p != vname.end(); p++) {
@@ -1174,9 +1176,16 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 			ctr->sample_rate = std::stoll(p->substr(val));
 			vname.erase(p--);
 		}
+		if ((*p).starts_with("label=")) {
+			ctr->label = p->substr(val);
+			vname.erase(p--);
+		}
 	}
 
 	ctr->name = string_join(vname, ",");
+	if (ctr->label == "") {
+		ctr->label = ctr->name;
+	}
 
 	for (int i = 0; i < b->num_cpu; ++i) {
 		bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
@@ -1777,7 +1786,7 @@ usage()
 	    "\t-f            Foreground\n"
 	    "\t-h            Help\n"
 	    "\t-n rate       Sampling rate\n"
-	    "\t-o dir        Output director\n"
+	    "\t-o dir        Output directory\n"
 	    "\t-p pmc        PMCs to monitor\n"
 	    "\t-l logfile    Log bcpi daemon\n"
 	    "\t-v            Verbose\n");

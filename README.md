@@ -23,8 +23,19 @@ Run the following to install dependencies:
 Getting Started
 ---------------
 
-Our bcpid collection daemon can should be run as root and records will be placed in `/var/tmp`. 
-The daemon can also be run in foreground mode for testing as with `-f` parameter.
+Our bcpid collection daemon can should be run as root and records will be 
+placed in `/var/tmp`.  The daemon can also be run in foreground mode for 
+testing as with `-f` parameter and you change the output directory using the 
+`-o` parameter.
+
+The default counters are picked up `conf/ARCH_NAME.conf` where architecture 
+name is displayed in the first line of `pmccontrol -l`.  The configuration file 
+accepts pmc formatted comma separated parameters to the counters.  We also 
+include two additional parameters `sample_rate` and `label`.
+
+NOTE: Moving forward you should set the label using the standard pmc counter 
+names with a few extensions we've made.  Currently we use `instructions`, 
+`branches`, `dc-misses`, and `l2dc-misses`.
 
 ```
 # bcpid/bcpid
@@ -35,10 +46,10 @@ Extract cache miss samples from the bcpi data in `/var/tmp` and stores them in
 
 `COUNTER` means the pmc counter, e.g. `mem_load_retired.l1_miss`
 
-`FILE` is the path to the executable to analyze
+`BINARY` is the path to the executable object to analyze
 
 ```
-# bcpiquery/bcpiquery extract -c COUNTER -o FILE
+# bcpiquery/bcpiquery extract -c COUNTER -o BINARY
 ```
 
 At the moment Ghidra requires that you provide a binary with DWARF symbols 
