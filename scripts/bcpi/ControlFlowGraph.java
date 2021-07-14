@@ -15,6 +15,9 @@ import ghidra.program.model.block.CodeBlockReferenceIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
 
+import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Multiset;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -22,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -97,6 +101,7 @@ public class ControlFlowGraph {
 	private final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> reverseCfg;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> domTree;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> postDomTree;
+	private final Multiset<CodeBlockVertex> coverage;
 
 	// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
 	private final Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
@@ -141,6 +146,25 @@ public class ControlFlowGraph {
 
 		this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, monitor);
 		this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
+
+		this.coverage = HashMultiset.create();
+	}
+
+	/**
+	 * Add coverage info for a code address.
+	 */
+	public void addCoverage(Address address, int count) throws Exception {
+		for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, this.monitor)) {
+			this.coverage.add(new CodeBlockVertex(block), count);
+		}
+	}
+
+	/**
+	 * Get the amount of coverage for a block.
+	 */
+	int getCoverage(CodeBlockVertex vertex) {
+		// Simple smoothing
+		return 1 + this.coverage.count(vertex);
 	}
 
 	/**
@@ -224,6 +248,7 @@ public class ControlFlowGraph {
 			containing.add(new CodeBlockVertex(block));
 		}
 
+		// Get definitely reached blocks
 		Set<CodeBlockVertex> vertices = new HashSet<>(containing);
 		if (BcpiConfig.ANALYZE_FORWARD_FLOW) {
 			vertices.addAll(getDefiniteSuccessors(containing));
@@ -232,11 +257,102 @@ public class ControlFlowGraph {
 			vertices.addAll(getDefinitePredecessors(containing));
 		}
 
-		// TODO: Compute likely reached blocks as well
+		// Get likely reached blocks
+		if (BcpiConfig.BEAM_PATHS > 0 && BcpiConfig.BEAM_WIDTH > 0) {
+			for (CodeBlockVertex vertex : containing) {
+				if (BcpiConfig.ANALYZE_FORWARD_FLOW) {
+					beamSearch(vertex, this.cfg, vertices);
+				}
+				if (BcpiConfig.ANALYZE_BACKWARD_FLOW) {
+					beamSearch(vertex, this.reverseCfg, vertices);
+				}
+			}
+		}
 
 		return vertices.stream()
 			.map(CodeBlockVertex::getCodeBlock)
 			.filter(Objects::nonNull)
 			.collect(Collectors.toSet());
+	}
+
+	/**
+	 * Do beam search to find likely reached blocks based on coverage information.
+	 */
+	private void beamSearch(
+		CodeBlockVertex start,
+		GDirectedGraph<CodeBlockVertex, CodeBlockEdge> cfg,
+		Set<CodeBlockVertex> vertices
+	) {
+		PriorityQueue<BeamPath> best = new PriorityQueue();
+
+		PriorityQueue<BeamPath> beam = new PriorityQueue();
+		beam.offer(new BeamPath(null, start, 1.0));
+
+		while (!beam.isEmpty()) {
+			List<BeamPath> parents = new ArrayList<>(beam);
+			beam.clear();
+
+			for (BeamPath parent : parents) {
+				int total = 0;
+				Set<CodeBlockVertex> successors = new HashSet<>(cfg.getSuccessors(parent.vertex));
+				for (CodeBlockVertex vertex : successors) {
+					total += getCoverage(vertex);
+				}
+
+				// Don't add looping paths
+				for (BeamPath tail = parent; tail != null; tail = tail.prev) {
+					successors.remove(tail.vertex);
+				}
+
+				for (CodeBlockVertex vertex : successors) {
+					double weight = (double)getCoverage(vertex) / total;
+					beam.offer(new BeamPath(parent, vertex, weight));
+					if (beam.size() > BcpiConfig.BEAM_WIDTH) {
+						beam.poll();
+					}
+				}
+
+				if (total == 0) {
+					best.offer(parent);
+					if (best.size() > BcpiConfig.BEAM_PATHS) {
+						best.poll();
+					}
+				}
+			}
+		}
+
+		for (BeamPath path : best) {
+			for (BeamPath tail = path; tail != null; tail = tail.prev) {
+				vertices.add(tail.vertex);
+			}
+		}
+	}
+}
+
+/**
+ * A partial path found during beam search.
+ */
+class BeamPath implements Comparable<BeamPath> {
+	/** The previous node in the path. */
+	final BeamPath prev;
+	/** The current node in the path. */
+	final CodeBlockVertex vertex;
+	/** Log probability of this path. */
+	final double weight;
+
+	BeamPath(BeamPath prev, CodeBlockVertex vertex, double weight) {
+		weight = Math.log(weight);
+		if (prev != null) {
+			weight += prev.weight;
+		}
+
+		this.prev = prev;
+		this.vertex = vertex;
+		this.weight = weight;
+	}
+
+	@Override
+	public int compareTo(BeamPath other) {
+		return Double.compare(this.weight, other.weight);
 	}
 }
