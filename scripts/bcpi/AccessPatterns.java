@@ -52,7 +52,7 @@ public class AccessPatterns {
 	private void collect(TaskMonitor monitor) throws Exception {
 		for (Address baseAddress : this.data.getAddresses()) {
 			Map<Structure, Set<DataTypeComponent>> pattern = new HashMap<>();
-			int count = this.data.getCount(baseAddress);
+			int count = this.data.getCount(baseAddress, BcpiConfig.CACHE_MISS_COUNTER);
 
 			Set<CodeBlock> blocks = getCodeBlocksThrough(baseAddress, monitor);
 			for (CodeBlock block : blocks) {
