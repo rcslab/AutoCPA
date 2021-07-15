@@ -10,6 +10,8 @@ import ghidra.util.task.TaskMonitor;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.HashMultimap;
+import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Multiset;
 import com.google.common.collect.SetMultimap;
 
 import java.io.BufferedReader;
@@ -41,9 +43,7 @@ public class BcpiData {
 		try (BufferedReader reader = Files.newBufferedReader(csv)) {
 			String line = null;
 			while ((line = reader.readLine()) != null) {
-				String values[] = line.split(",");
-				String kv[] = values[1].split("=");
-				int count = Integer.parseInt(kv[1]);
+				String[] values = line.split(",");
 
 				for (Program program : programs) {
 					Address address = program.getAddressFactory().getAddress(values[0]);
@@ -52,10 +52,17 @@ public class BcpiData {
 					}
 
 					Function function = program.getListing().getFunctionContaining(address);
-					if (function != null) {
-						rows.put(address, new BcpiDataRow(address, program, function, count));
-						break;
+					if (function == null) {
+						continue;
 					}
+
+					Multiset<String> counters = HashMultiset.create();
+					for (int i = 1; i < values.length; ++i) {
+						String[] kv = values[i].split("=");
+						counters.add(kv[0], Integer.parseInt(kv[1]));
+					}
+					rows.put(address, new BcpiDataRow(address, program, function, counters));
+					break;
 				}
 			}
 		}
@@ -92,14 +99,14 @@ public class BcpiData {
 	}
 
 	/**
-	 * @return The number of events collected for the given address.
+	 * @return The number of events collected for the given address and counter.
 	 */
-	public int getCount(Address address) {
+	public int getCount(Address address, String counter) {
 		BcpiDataRow row = this.rows.get(address);
 		if (row == null) {
 			return 0;
 		} else {
-			return row.count;
+			return row.getCount(counter);
 		}
 	}
 

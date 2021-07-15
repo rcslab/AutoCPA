@@ -44,12 +44,10 @@ names with a few extensions we've made.  Currently we use `instructions`,
 Extract cache miss samples from the bcpi data in `/var/tmp` and stores them in 
 `address_info.csv`.
 
-`COUNTER` means the pmc counter, e.g. `mem_load_retired.l1_miss`
-
 `BINARY` is the path to the executable object to analyze
 
 ```
-# bcpiquery/bcpiquery extract -c COUNTER -o BINARY
+# bcpiquery/bcpiquery extract -o BINARY
 ```
 
 At the moment Ghidra requires that you provide a binary with DWARF symbols 
