@@ -439,9 +439,10 @@ class Bucket {
 	private static void sort(List<DataTypeComponent> fields) {
 		// Sort by highest alignment first to reduce holes
 		Collections.sort(fields, Comparator
-			.<DataTypeComponent>comparingInt(f -> f.getDataType().getAlignment())
-			.thenComparingInt(f -> f.getDataType().getLength())
-			.reversed());
+			.<DataTypeComponent>comparingInt(f -> -f.getDataType().getAlignment())
+			.thenComparingInt(f -> -f.getDataType().getLength())
+			.thenComparing(f -> f.getDataType().getName())
+			.thenComparing(f -> f.getFieldName()));
 	}
 
 	/**
