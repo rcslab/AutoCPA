@@ -102,6 +102,8 @@ struct bcpid_pmc_counter {
 	std::string name;
 	std::string label;
 	int sample_rate;
+	bool callchain;
+	bool usercallchain;
 };
 
 // Represent a distinct object file (executable or dynamic library)
@@ -940,6 +942,15 @@ bcpid_event_handler_callchain(bcpid *b, const struct pmclog_ev *ev)
 	bcpid_pc_node *to_node;
 	bcpid_pc_node *from_node;
 
+	if (chain_len == 1) {
+		uint64_t pc = cc->pl_pc[0];
+
+		to_node = bcpid_get_node_from_pc(b, proc, pc);
+		++to_node->end_ctr[spec_index];
+
+		return;
+	}
+
 	for (int i = 1; i < chain_len; ++i) {
 		uint64_t to_pc = cc->pl_pc[i - 1];
 		uint64_t from_pc = cc->pl_pc[i];
@@ -1168,16 +1179,26 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 	ctr->hits = 0;
 	ctr->sample_rate = (count == -1) ? b->default_count : count;
 	ctr->label = "";
+	ctr->callchain = false;
+	ctr->usercallchain = false;
 
 	auto vname = string_split(name, ",");
 	for (auto p = vname.begin(); p != vname.end(); p++) {
 		size_t val = p->find("=") + 1;
-		if ((*p).starts_with("sample_rate=")) {
+		if (p->starts_with("sample_rate=")) {
 			ctr->sample_rate = std::stoll(p->substr(val));
 			vname.erase(p--);
 		}
-		if ((*p).starts_with("label=")) {
+		if (p->starts_with("label=")) {
 			ctr->label = p->substr(val);
+			vname.erase(p--);
+		}
+		if (p->starts_with("callchain")) {
+			ctr->callchain = true;
+			vname.erase(p--);
+		}
+		if (p->starts_with("usercallchain")) {
+			ctr->usercallchain = true;
 			vname.erase(p--);
 		}
 	}
@@ -1190,8 +1211,15 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 	for (int i = 0; i < b->num_cpu; ++i) {
 		bcpid_pmc_cpu *cpu = &b->pmc_cpus[i];
 		pmc_id_t pmc_id;
-		int status = pmc_allocate(ctr->name.c_str(), PMC_MODE_SS,
-		    PMC_F_CALLCHAIN, i, &pmc_id, ctr->sample_rate);
+		uint32_t flags = 0;
+
+		flags |= (ctr->callchain) ? PMC_F_CALLCHAIN : 0;
+		flags |= (ctr->usercallchain) ?
+			  (PMC_F_USERCALLCHAIN | PMC_F_CALLCHAIN) :
+			  0;
+
+		int status = pmc_allocate(ctr->name.c_str(), PMC_MODE_SS, flags,
+		    i, &pmc_id, ctr->sample_rate);
 		if (status < 0) {
 			PERROR("pmc_allocate");
 			goto fail;
