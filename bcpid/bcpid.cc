@@ -256,8 +256,6 @@ struct bcpid {
 
 	std::vector<bcpid_kernel_object> kernel_objects;
 
-	struct rusage last_usage;
-
 	int num_node;
 	int num_edge;
 
@@ -390,7 +388,7 @@ bcpid_object_init(bcpid *b, bcpid_object *obj, const std::string &path)
  * end as is.
  */
 void *
-bcpid_pmglog_thread_main(void *arg)
+bcpid_pmclog_thread_main(void *arg)
 {
 	bcpid *b = (bcpid *)arg;
 
@@ -1413,7 +1411,7 @@ bcpid_setup_pmc(bcpid *b)
 	bcpid_kevent_set(b, SIGINFO, EVFILT_SIGNAL, EV_ADD, 0, 0, 0);
 
 	status = pthread_create(
-	    &b->pmclog_forward_thr, 0, bcpid_pmglog_thread_main, b);
+	    &b->pmclog_forward_thr, 0, bcpid_pmclog_thread_main, b);
 	if (status != 0) {
 		SYSERROR("pthred_create: %s", strerror(status));
 	}
@@ -1547,10 +1545,6 @@ tv_to_usec(const struct timeval *r)
 	return t;
 }
 
-#if defined(BCPID_DEBUG)
-static uint64_t timer_counter = 0;
-#endif
-
 /*
  * Periodically run piece of code. See BCPID_INTERVAL for period.
  * Currently it collects performance metrics of daemon, and
@@ -1559,37 +1553,32 @@ static uint64_t timer_counter = 0;
 static void
 bcpid_handle_timer(bcpid *b)
 {
+	static uint64_t timer_counter = 0;
+	static rusage r_old = { { 0, 0 } };
 	struct rusage r;
 	int status;
 	uint64_t new_time, old_time, time_diff;
 	bcpid_statistics stats;
 
-	status = getrusage(RUSAGE_SELF, &r);
-	if (status != 0) {
-		PERROR("getrusage");
-		abort();
-	}
+	if (verbose && ((timer_counter++ % 60) == 0)) {
+		status = getrusage(RUSAGE_SELF, &r);
+		if (status != 0) {
+			PERROR("getrusage");
+			abort();
+		}
 
-	new_time = tv_to_usec(&r.ru_utime) + tv_to_usec(&r.ru_stime);
-	old_time = tv_to_usec(&b->last_usage.ru_utime) +
-	    tv_to_usec(&b->last_usage.ru_stime);
-	time_diff = new_time - old_time;
+		new_time = tv_to_usec(&r.ru_utime) + tv_to_usec(&r.ru_stime);
+		old_time = tv_to_usec(&r_old.ru_utime) +
+		    tv_to_usec(&r_old.ru_stime);
+		time_diff = new_time - old_time;
+
+		r_old = r;
+
+		MSG("Memory Max RSS %lu MiB, CPU %lu ms", r.ru_maxrss / 1024,
+		    time_diff / 1000);
+	}
 
 	bcpid_collect_struct_stat(b, &stats);
-
-#if defined(BCPID_DEBUG)
-	if ((timer_counter++ % 60) == 0) {
-		LOG("Resources:");
-		LOG("\tMemory Max RSS %lu MiB, CPU %lu ms", r.ru_maxrss / 1024,
-		    time_diff / 1000);
-		LOG("\tkernel_objects %lu, pids %lu", b->kernel_objects.size(),
-		    b->pid_to_program.size());
-		LOG("\tobjects %d, programs %d, nodes %d, edges %d, num_object_hash %d",
-		    stats.num_object, stats.num_program, stats.num_node,
-		    stats.num_edge, stats.num_object_hash);
-	}
-#endif
-
 	if (stats.num_edge > b->edge_collect_threshold ||
 	    stats.num_node > b->node_collect_threshold) {
 		MSG("saving...");
@@ -1599,8 +1588,6 @@ bcpid_handle_timer(bcpid *b)
 	if (stats.num_object_hash > b->object_hash_collect_threshold) {
 		b->object_hash_cache.clear();
 	}
-
-	b->last_usage = r;
 }
 
 static void
