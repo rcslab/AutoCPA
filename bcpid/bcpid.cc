@@ -944,7 +944,12 @@ bcpid_event_handler_callchain(bcpid *b, const struct pmclog_ev *ev)
 		uint64_t pc = cc->pl_pc[0];
 
 		to_node = bcpid_get_node_from_pc(b, proc, pc);
-		++to_node->end_ctr[spec_index];
+		if (to_node) {
+			++to_node->end_ctr[spec_index];
+		} else {
+			bcpid_debug_counter_increment(
+			    b, bcpid_debug_callchain_pc_skip);
+		}
 
 		return;
 	}
