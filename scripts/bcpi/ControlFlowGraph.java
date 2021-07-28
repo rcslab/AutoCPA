@@ -283,9 +283,9 @@ public class ControlFlowGraph {
 		GDirectedGraph<CodeBlockVertex, CodeBlockEdge> cfg,
 		Set<CodeBlockVertex> vertices
 	) {
-		PriorityQueue<BeamPath> best = new PriorityQueue();
+		PriorityQueue<BeamPath> best = new PriorityQueue<>();
 
-		PriorityQueue<BeamPath> beam = new PriorityQueue();
+		PriorityQueue<BeamPath> beam = new PriorityQueue<>();
 		beam.offer(new BeamPath(null, start, 1.0));
 
 		while (!beam.isEmpty()) {
