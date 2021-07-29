@@ -102,6 +102,7 @@ struct bcpid_pmc_counter {
 	std::string name;
 	std::string label;
 	int sample_rate;
+	int sample_ratio;
 	bool callchain;
 	bool usercallchain;
 };
@@ -253,6 +254,9 @@ struct bcpid {
 	std::string default_pmc;
 	std::string default_output_dir;
 	bool pmc_override;
+	int64_t target_cpu;
+
+	bool adaptive;
 
 	std::vector<bcpid_kernel_object> kernel_objects;
 
@@ -1181,6 +1185,7 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 
 	ctr->hits = 0;
 	ctr->sample_rate = (count == -1) ? b->default_count : count;
+	ctr->sample_ratio = 1;
 	ctr->label = "";
 	ctr->callchain = false;
 	ctr->usercallchain = false;
@@ -1190,6 +1195,11 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 		size_t val = p->find("=") + 1;
 		if (p->starts_with("sample_rate=")) {
 			ctr->sample_rate = std::stoll(p->substr(val));
+			ctr->sample_ratio = 0;
+			vname.erase(p--);
+		}
+		if (p->starts_with("sample_ratio=")) {
+			ctr->sample_ratio = std::stoll(p->substr(val));
 			vname.erase(p--);
 		}
 		if (p->starts_with("label=")) {
@@ -1204,6 +1214,10 @@ bcpid_alloc_pmc(bcpid *b, const std::string &name, int count = -1)
 			ctr->usercallchain = true;
 			vname.erase(p--);
 		}
+	}
+
+	if (ctr->sample_ratio) {
+		b->adaptive = true;
 	}
 
 	ctr->name = string_join(vname, ",");
@@ -1308,6 +1322,40 @@ bcpid_release_all(bcpid *b)
 	}
 }
 
+void
+bcpid_update_adaptive(bcpid *b)
+{
+	for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
+		bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
+
+		// Ignore invalid or fixed sample rate counters
+		if (!ctr->is_valid || ctr->sample_ratio == 0) {
+			continue;
+		}
+
+		for (int j = 0; j < b->num_cpu; ++j) {
+			int status;
+			bcpid_pmc_cpu *cpu = &b->pmc_cpus[j];
+			pmc_id_t pmc_id = cpu->pmcs[i];
+
+			status = pmc_stop(pmc_id);
+			if (status < 0) {
+				PERROR("pmc_stop");
+			}
+
+			status = pmc_set(pmc_id, ctr->sample_rate);
+			if (status < 0) {
+				PERROR("pmc_set");
+			}
+
+			status = pmc_start(pmc_id);
+			if (status < 0) {
+				PERROR("pmc_start");
+			}
+		}
+	}
+}
+
 static int
 bcpid_parse_config(bcpid *b)
 {
@@ -1335,6 +1383,8 @@ bcpid_parse_config(bcpid *b)
 		SYSERROR("Could not open configuration file '%s'", conf_name);
 		exit(EX_NOINPUT);
 	}
+
+	b->adaptive = false;
 
 	for (;;) {
 		char ctr[128];
@@ -1524,8 +1574,8 @@ bcpid_print_stats(bcpid *b)
 			continue;
 		}
 
-		MSG("\t%s sample_rate=%d %lu", c->name.c_str(), c->sample_rate,
-		    c->hits);
+		MSG("\t%s sample_rate=%d sample_ratio=%d %lu", c->name.c_str(),
+		    c->sample_rate, c->sample_ratio, c->hits);
 	}
 }
 
@@ -1564,6 +1614,95 @@ bcpid_handle_timer(bcpid *b)
 	int status;
 	uint64_t new_time, old_time, time_diff;
 	bcpid_statistics stats;
+
+#define PID_Ku 1
+#define PID_Tu 2
+#define PID_Kp (5000 * PID_Ku)
+#define PID_Ki (5400 * PID_Ku / PID_Tu)
+#define PID_Kd (300 * PID_Ku * PID_Tu / 40)
+#define PID_Ks (2)
+#define PID_DIVIDER (100)
+#define PID_GAIN (25)
+#define PID_BOUND (100000)
+
+	if (b->adaptive) {
+		static int64_t pid_int = 0;
+		static int64_t pid_deriv = 0;
+		static int64_t pid_old = 0;
+		static rusage r_prev = { { 0, 0 } };
+		int64_t pid_err, pid_out;
+
+		getrusage(RUSAGE_SELF, &r);
+
+		new_time = tv_to_usec(&r.ru_utime) + tv_to_usec(&r.ru_stime);
+		old_time = tv_to_usec(&r_prev.ru_utime) +
+		    tv_to_usec(&r_prev.ru_stime);
+		time_diff = new_time - old_time;
+
+		pid_err = time_diff -
+		    (1000LL * BCPID_INTERVAL * b->target_cpu) / 100;
+
+		/*
+		 * Negative errors tend to be smaller than positive errors.  We
+		 * can compensate for this skew by multiplying negative values
+		 * and dividing positive values by a small integer constant.
+		 */
+		pid_err = (pid_err < 0) ? (pid_err * PID_Ks) :
+						(pid_err / PID_Ks);
+
+		pid_out = pid_err * PID_Kp + pid_int * PID_Ki +
+		    (pid_deriv - pid_err) * PID_Kd;
+		pid_out /= (PID_DIVIDER * PID_GAIN);
+
+		LOG("pid_int %ld pid_deriv %ld time_diff %ld pid_err %ld pid_out %ld",
+		    pid_int, pid_deriv - pid_err, time_diff, pid_err, pid_out);
+
+		pid_int += pid_err;
+		pid_deriv = pid_err;
+		r_prev = r;
+
+		/*
+		 * Bound final sample rate by 1k and 100M.
+		 */
+		if (pid_out > 100000000)
+			pid_out = 100000000;
+		if (pid_out < 1000)
+			pid_out = 1000;
+
+		uint64_t sample_total = 0;
+		for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
+			bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
+
+			// Ignore invalid or fixed sample rate counters
+			if (!ctr->is_valid || ctr->sample_ratio == 0) {
+				continue;
+			}
+
+			sample_total += ctr->sample_ratio;
+		}
+
+		for (int i = 0; i < BCPI_MAX_NUM_COUNTER; ++i) {
+			bcpid_pmc_counter *ctr = &b->pmc_ctrs[i];
+
+			if (!ctr->is_valid || ctr->sample_ratio == 0) {
+				continue;
+			}
+
+			ctr->sample_rate = pid_out * ctr->sample_ratio /
+			    sample_total;
+		}
+
+		/*
+		 * Reduce the number of changes to the sample rate
+		 */
+		if ((pid_old < pid_out) ? (pid_old < pid_out + PID_BOUND) :
+						(pid_old > pid_out + PID_BOUND)) {
+			DLOG("Update sample rate");
+			bcpid_update_adaptive(b);
+		}
+
+		pid_old = pid_out;
+	}
 
 	if (verbose && ((timer_counter++ % 60) == 0)) {
 		status = getrusage(RUSAGE_SELF, &r);
@@ -1802,6 +1941,7 @@ usage()
 	fprintf(stderr,
 	    "Usage: bcpid [-c count] [-p pmc1;pmc2;...] [-o dir]\n"
 	    "\t-L            List PMCs\n"
+	    "\t-a %%cpu       Target CPU usage (default: 5%%)\n"
 	    "\t-c config     Configuration file\n"
 	    "\t-f            Foreground\n"
 	    "\t-h            Help\n"
@@ -1822,16 +1962,22 @@ bcpid_parse_options(bcpid *b, int argc, const char *argv[])
 	b->default_count = BCPID_DEFAULT_COUNT;
 	b->default_pmc = "";
 	b->default_output_dir = BCPID_OUTPUT_DIRECTORY;
+	b->target_cpu = 5;
+	b->adaptive = true;
 	b->pmc_override = false;
 	b->edge_collect_threshold = BCPID_EDGE_GC_THRESHOLD;
 	b->node_collect_threshold = BCPID_NODE_GC_THRESHOLD;
 	b->object_hash_collect_threshold = BCPID_OBJECT_HASH_GC_THRESHOLD;
 
-	while ((opt = getopt(argc, (char **)argv, "Lc:fhn:o:p:l:v")) != -1) {
+	while ((opt = getopt(argc, (char **)argv, "Lc:fhn:o:p:l:va:")) != -1) {
 		switch (opt) {
 		case 'L': {
 			bcpid_print_pmcs();
 			exit(EX_OK);
+		}
+		case 'a': {
+			b->target_cpu = atoi(optarg);
+			break;
 		}
 		case 'c': {
 			b->config_file = optarg;

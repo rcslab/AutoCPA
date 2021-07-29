@@ -31,11 +31,17 @@ testing as with `-f` parameter and you change the output directory using the
 The default counters are picked up `conf/ARCH_NAME.conf` where architecture 
 name is displayed in the first line of `pmccontrol -l`.  The configuration file 
 accepts pmc formatted comma separated parameters to the counters.  We also 
-include two additional parameters `sample_rate` and `label`.
+include several additional parameters `sample_rate`, `sample_ratio` and 
+`label`.
 
-NOTE: Moving forward you should set the label using the standard pmc counter 
-names with a few extensions we've made.  Currently we use `instructions`, 
-`branches`, `dc-misses`, and `l2dc-misses`.
+Sampling can be done at a fixed rate or adaptive rate.  For fixed counters 
+specify the `sample_rate`.  For adaptive counters specify the `sample_ratio` 
+and set the target CPU overhead using `-a %CPU` parameter to bcpid.  The daemon 
+will change the sample rate to meet the target CPU usage.
+
+You should set the label using the standard pmc counter names with a few 
+extensions we've made.  Currently we use `instructions`, `branches`, 
+`dc-misses`, and `l2dc-misses`.
 
 ```
 # bcpid/bcpid
