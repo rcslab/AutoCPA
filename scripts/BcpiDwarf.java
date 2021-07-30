@@ -25,11 +25,6 @@ public class BcpiDwarf extends GhidraScript {
 
 	@Override
 	public void run() throws Exception {
-		if (!DWARFProgram.isDWARF(currentProgram, monitor)) {
-			popup("Unable to find DWARF information, aborting");
-			return;
-		}
-
 		DWARFImportOptions importOptions = new DWARFImportOptions();
 		importOptions.setPreloadAllDIEs(true);
 		importOptions.setImportLimitDIECount(Integer.MAX_VALUE);
