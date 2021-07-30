@@ -71,7 +71,8 @@ public class AccessPatterns {
 						continue;
 					}
 
-					for (DataTypeComponent field : this.refs.getFields(address)) {
+					for (FieldReference ref : this.refs.getFields(address)) {
+						DataTypeComponent field = ref.getField();
 						Structure struct = (Structure) field.getParent();
 						pattern.computeIfAbsent(struct, k -> new HashSet<>())
 							.add(field);
