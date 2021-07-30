@@ -22,5 +22,5 @@ cat_or_kldstat() {
 }
 
 cat_or_kldstat "$3" | tail -n+2 | while read id refs address size name; do
-    $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL/$name" -processor x86:LE:64:default -cspec gcc -loader ElfLoader -loader-imagebase "$address" -max-cpu 24 -preScript DWARF_ExtractorScript.java
+    $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL/$name" -processor x86:LE:64:default -cspec gcc -loader ElfLoader -loader-imagebase "$address" -max-cpu 24 -scriptPath "$ROOT/scripts" -preScript BcpiDwarf.java
 done
