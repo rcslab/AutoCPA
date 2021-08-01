@@ -15,7 +15,7 @@ GHIDRA_HEADLESS=${GHIDRA_HEADLESS:-/usr/local/share/ghidra/support/analyzeHeadle
 mkdir -p "$PROJ"
 
 if [ ! -e "$PROJ/$SHORT.gpr" ]; then
-    $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -scriptPath "$ROOT/scripts" -postScript BcpiDwarf.java
+    $GHIDRA_HEADLESS "$PROJ" "$SHORT" -import "$FULL" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -scriptPath "$ROOT/scripts" -preScript BcpiDwarf.java
 fi
 
 shift 3
