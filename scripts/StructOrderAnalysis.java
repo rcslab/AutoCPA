@@ -4,6 +4,7 @@ import bcpi.BcpiConfig;
 import bcpi.BcpiData;
 import bcpi.BcpiDataRow;
 import bcpi.ControlFlowGraph;
+import bcpi.Field;
 import bcpi.FieldReferences;
 
 import ghidra.app.script.GhidraScript;
@@ -12,7 +13,6 @@ import ghidra.framework.model.DomainFolder;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.DefaultDataType;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.listing.Function;
@@ -188,7 +188,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		Map<DataTypeComponent, Integer> rows = new HashMap<>();
 		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
-			if (field.getDataType().equals(DefaultDataType.dataType)) {
+			if (Field.isPadding(field)) {
 				padding += field.getLength();
 			} else {
 				addPadding(table, padding);
@@ -216,8 +216,12 @@ public class StructOrderAnalysis extends GhidraScript {
 				.append(percent)
 				.append("%");
 
-			for (DataTypeComponent field : pattern.getFields()) {
-				table.get(rows.get(field), col).append("*");
+			for (Field field : pattern.getFields()) {
+				for (DataTypeComponent component : field.getComponents()) {
+					if (!Field.isPadding(component)) {
+						table.get(rows.get(component), col).append("*");
+					}
+				}
 			}
 
 			// Don't make the table too wide
@@ -245,7 +249,7 @@ public class StructOrderAnalysis extends GhidraScript {
 
 		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
-			if (field.getDataType().equals(DefaultDataType.dataType)) {
+			if (Field.isPadding(field)) {
 				padding += field.getLength();
 			} else {
 				addPadding(table, padding);
@@ -373,36 +377,36 @@ class Bucket {
 	/** Maximum one cache line. */
 	private static final int MAX_SIZE = 64;
 
-	private List<DataTypeComponent> fields;
+	private List<Field> fields;
 	private int size;
 
-	private Bucket(List<DataTypeComponent> fields) {
+	private Bucket(List<Field> fields) {
 		this.fields = ImmutableList.copyOf(fields);
 		this.size = sizeOf(fields);
 	}
 
-	List<DataTypeComponent> getFields() {
+	List<Field> getFields() {
 		return this.fields;
 	}
 
 	/**
 	 * Add a field into a list of buckets.
 	 */
-	static void pack(List<Bucket> buckets, DataTypeComponent field) {
+	static void pack(List<Bucket> buckets, Field field) {
 		pack(buckets, Collections.singletonList(field));
 	}
 
 	/**
 	 * Add some fields into a list of buckets.
 	 */
-	static void pack(List<Bucket> buckets, Collection<DataTypeComponent> fields) {
+	static void pack(List<Bucket> buckets, Collection<Field> fields) {
 		for (Bucket bucket : buckets) {
 			if (bucket.tryAdd(fields)) {
 				return;
 			}
 		}
 
-		List<DataTypeComponent> fieldList = new ArrayList<>(fields);
+		List<Field> fieldList = new ArrayList<>(fields);
 		sort(fieldList);
 
 		while (!fieldList.isEmpty()) {
@@ -420,8 +424,8 @@ class Bucket {
 	 *
 	 * @return Whether the fields were successfully added.
 	 */
-	private boolean tryAdd(Collection<DataTypeComponent> fields) {
-		List<DataTypeComponent> newFields = new ArrayList<>(this.fields);
+	private boolean tryAdd(Collection<Field> fields) {
+		List<Field> newFields = new ArrayList<>(this.fields);
 		newFields.addAll(fields);
 		sort(newFields);
 
@@ -436,10 +440,10 @@ class Bucket {
 	/**
 	 * Sort a sequence of fields to reduce holes.
 	 */
-	private static void sort(List<DataTypeComponent> fields) {
+	private static void sort(List<Field> fields) {
 		// Sort by highest alignment first to reduce holes
 		Collections.sort(fields, Comparator
-			.<DataTypeComponent>comparingInt(f -> -f.getDataType().getAlignment())
+			.<Field>comparingInt(f -> -f.getDataType().getAlignment())
 			.thenComparingInt(f -> -f.getDataType().getLength())
 			.thenComparing(f -> f.getDataType().getName())
 			.thenComparing(f -> f.getFieldName()));
@@ -448,10 +452,10 @@ class Bucket {
 	/**
 	 * Compute the size of a sequence of fields.
 	 */
-	private static int sizeOf(List<DataTypeComponent> fields) {
+	private static int sizeOf(List<Field> fields) {
 		int size = 0;
 
-		for (DataTypeComponent field : fields) {
+		for (Field field : fields) {
 			int align = field.getDataType().getAlignment();
 			if (size % align != 0) {
 				size += align - (size % align);
@@ -471,31 +475,30 @@ class CostModel {
 	 * Optimize the layout of a struct according to its access pattern.
 	 */
 	static Structure optimize(AccessPatterns patterns, Structure struct) {
-		Set<DataTypeComponent> added = new HashSet<>();
+		Set<Field> added = new HashSet<>();
 		List<Bucket> buckets = new ArrayList<>();
 
 		// Pack the most common access patterns first
 		for (AccessPattern pattern : patterns.getPatterns(struct)) {
-			Set<DataTypeComponent> fields = new HashSet<>(pattern.getFields());
+			Set<Field> fields = new HashSet<>(pattern.getFields());
 			fields.removeAll(added);
 			Bucket.pack(buckets, fields);
 			added.addAll(fields);
 		}
 
 		// Add any missing fields we didn't see get accessed
-		for (DataTypeComponent field : struct.getComponents()) {
-			// Skip padding
-			if (!field.getDataType().equals(DefaultDataType.dataType) && !added.contains(field)) {
+		for (Field field : Field.allFields(struct)) {
+			if (!field.isPadding() && !added.contains(field)) {
 				Bucket.pack(buckets, field);
 			}
 		}
 
 		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
-		for (Bucket bucket : buckets) {
-			for (DataTypeComponent field : bucket.getFields()) {
-				optimized.add(field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
-			}
-		}
+		buckets.stream()
+			.flatMap(b -> b.getFields().stream())
+			.flatMap(f -> f.getComponents().stream())
+			.filter(c -> !Field.isPadding(c))
+			.forEach(c -> optimized.add(c.getDataType(), c.getLength(), c.getFieldName(), c.getComment()));
 		return optimized;
 	}
 
@@ -508,10 +511,10 @@ class CostModel {
 		for (AccessPattern pattern : patterns.getPatterns(original)) {
 			Set<Integer> cacheLines = new HashSet<>();
 
-			for (DataTypeComponent field : pattern.getFields()) {
+			for (Field field : pattern.getFields()) {
 				int start = 0;
 				int end = 0;
-				for (DataTypeComponent optField : struct.getComponents()) {
+				for (Field optField : Field.allFields(struct)) {
 					if (Objects.equals(field.getFieldName(), optField.getFieldName())) {
 						start = optField.getOffset();
 						end = optField.getEndOffset();

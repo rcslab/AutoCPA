@@ -8,7 +8,6 @@ import ghidra.app.decompiler.parallel.DecompilerCallback;
 import ghidra.app.decompiler.parallel.ParallelDecompiler;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighFunction;
@@ -176,7 +175,7 @@ public class FieldReferences {
 		Varnode ptr = inputs[1];
 
 		Facts facts = dataFlow.getFacts(ptr);
-		DataTypeComponent field = facts.getField();
+		Field field = facts.getField();
 		if (field == null) {
 			return;
 		}

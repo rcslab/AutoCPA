@@ -1,23 +1,21 @@
 package bcpi;
 
-import ghidra.program.model.data.DataTypeComponent;
-
 import java.util.Objects;
 
 /**
  * Metadata about a struct field reference.
  */
 public class FieldReference {
-	private final DataTypeComponent field;
+	private final Field field;
 	private final boolean arrayAccess;
 
-	FieldReference(DataTypeComponent field, boolean arrayAccess) {
+	FieldReference(Field field, boolean arrayAccess) {
 		this.field = field;
 		this.arrayAccess = arrayAccess;
 	}
 
 	/** The field being accessed. */
-	public DataTypeComponent getField() {
+	public Field getField() {
 		return this.field;
 	}
 

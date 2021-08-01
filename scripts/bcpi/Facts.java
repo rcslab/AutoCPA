@@ -1,21 +1,19 @@
 package bcpi;
 
-import ghidra.program.model.data.DataTypeComponent;
-
 import java.util.Objects;
 
 /**
  * Data flow facts.
  */
 class Facts {
-	private final Lattice<DataTypeComponent> field;
+	private final Lattice<Field> field;
 	private final boolean array;
 
 	Facts() {
 		this(Lattice.none(), false);
 	}
 
-	private Facts(Lattice<DataTypeComponent> field, boolean array) {
+	private Facts(Lattice<Field> field, boolean array) {
 		this.field = field;
 		this.array = array;
 	}
@@ -23,7 +21,7 @@ class Facts {
 	/**
 	 * @return A copy of these facts, overriding the struct field.
 	 */
-	Facts withField(DataTypeComponent field) {
+	Facts withField(Field field) {
 		return new Facts(Lattice.of(field), this.array);
 	}
 
@@ -37,7 +35,7 @@ class Facts {
 	/**
 	 * @return The struct field associated with this varnode, if any.
 	 */
-	DataTypeComponent getField() {
+	Field getField() {
 		return this.field.get();
 	}
 
@@ -79,7 +77,7 @@ class Facts {
 	@Override
 	public String toString() {
 		String fieldStr;
-		DataTypeComponent field = this.field.get();
+		Field field = this.field.get();
 		if (field == null) {
 			fieldStr = this.field.toString();
 		} else {

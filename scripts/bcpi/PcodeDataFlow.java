@@ -1,7 +1,6 @@
 package bcpi;
 
 import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.TypeDef;
@@ -98,8 +97,12 @@ class PcodeDataFlow {
 
 				Structure struct = (Structure) type;
 				int fieldOffset = (int) offset.getOffset();
-				DataTypeComponent field = struct.getComponentAt(fieldOffset);
-				return getFacts(base).withField(field);
+				Field field = Field.atOffset(struct, fieldOffset);
+				if (field == null) {
+					return getFacts(base);
+				} else {
+					return getFacts(base).withField(field);
+				}
 			}
 		}
 
