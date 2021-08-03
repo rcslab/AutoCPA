@@ -23,8 +23,8 @@ while read id refs base size name; do
     if [ "$name" = "kernel" ]; then
         cat address_info.csv >>"$CSV"
     else
-        while IFS=',' read count address; do
-            printf '%d,%x\n' "$count" "$(($base + 0x$address))"
+        while IFS=',' read addr rest; do
+            printf '%x,%s\n' "$(($base + 0x$addr))" "$rest"
         done <address_info.csv >>"$CSV"
     fi
 done <"$KLDSTAT"
