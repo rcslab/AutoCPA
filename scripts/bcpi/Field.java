@@ -157,7 +157,9 @@ public class Field {
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(this.parent, this.type, this.offset, this.endOffset, this.components);
+		// Don't hash the components due to
+		// https://github.com/NationalSecurityAgency/ghidra/blob/df50264a372b0fa39a244ed703c66cf30359ab08/Ghidra/Framework/SoftwareModeling/src/main/java/ghidra/program/model/data/DataTypeComponentImpl.java#L275-L279
+		return Objects.hash(this.parent, this.type, this.offset, this.endOffset);
 	}
 
 	@Override

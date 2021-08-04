@@ -185,7 +185,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			.append(struct.getName())
 			.append(" {");
 
-		Map<DataTypeComponent, Integer> rows = new HashMap<>();
+		Map<Integer, Integer> rows = new HashMap<>();
 		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
 			if (Field.isPadding(field)) {
@@ -195,7 +195,7 @@ public class StructOrderAnalysis extends GhidraScript {
 				padding = 0;
 
 				int row = addField(table, field);
-				rows.put(field, row);
+				rows.put(field.getOrdinal(), row);
 			}
 		}
 		addPadding(table, padding);
@@ -219,7 +219,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			for (Field field : pattern.getFields()) {
 				for (DataTypeComponent component : field.getComponents()) {
 					if (!Field.isPadding(component)) {
-						table.get(rows.get(component), col).append("*");
+						table.get(rows.get(component.getOrdinal()), col).append("*");
 					}
 				}
 			}
