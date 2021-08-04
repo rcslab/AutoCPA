@@ -1,7 +1,6 @@
 package bcpi;
 
 import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.DataTypeComponent;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -12,13 +11,13 @@ import java.util.Objects;
  * A set of fields accessed in a block.
  */
 public class AccessPattern {
-	private final Set<DataTypeComponent> fields;
+	private final Set<Field> fields;
 
-	public AccessPattern(Set<DataTypeComponent> fields) {
+	public AccessPattern(Set<Field> fields) {
 		this.fields = ImmutableSet.copyOf(fields);
 	}
 
-	public Set<DataTypeComponent> getFields() {
+	public Set<Field> getFields() {
 		return this.fields;
 	}
 
@@ -27,7 +26,7 @@ public class AccessPattern {
 		StringBuilder result = new StringBuilder();
 
 		DataType struct = null;
-		for (DataTypeComponent field : this.fields) {
+		for (Field field : this.fields) {
 			if (struct == null) {
 				struct = field.getParent();
 				result.append(struct.getName())

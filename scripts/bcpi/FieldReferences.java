@@ -1,24 +1,19 @@
 package bcpi;
 
-import ghidra.app.decompiler.ClangFieldToken;
-import ghidra.app.decompiler.ClangLine;
-import ghidra.app.decompiler.ClangToken;
-import ghidra.app.decompiler.ClangTokenGroup;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
-import ghidra.app.decompiler.component.DecompilerUtils;
 import ghidra.app.decompiler.parallel.DecompileConfigurer;
 import ghidra.app.decompiler.parallel.DecompilerCallback;
 import ghidra.app.decompiler.parallel.ParallelDecompiler;
-import ghidra.app.extension.datatype.finder.DecompilerVariable;
-import ghidra.app.extension.datatype.finder.DecompilerReference;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.PcodeOpAST;
+import ghidra.program.model.pcode.Varnode;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
@@ -39,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Maps code addresses to the struct field(s) they reference.
  */
 public class FieldReferences {
-	private final Map<Address, Set<DataTypeComponent>> refs = new ConcurrentHashMap<>();
+	private final Map<Address, Set<FieldReference>> refs = new ConcurrentHashMap<>();
 	private final AtomicInteger decompileCount = new AtomicInteger();
 
 	/**
@@ -69,7 +64,7 @@ public class FieldReferences {
 
 	private int size() {
 		int size = 0;
-		for (Map.Entry<Address, Set<DataTypeComponent>> entry : this.refs.entrySet()) {
+		for (Map.Entry<Address, Set<FieldReference>> entry : this.refs.entrySet()) {
 			size += entry.getValue().size();
 		}
 		return size;
@@ -107,7 +102,7 @@ public class FieldReferences {
 	/**
 	 * Get the fields accessed at a particular address.
 	 */
-	public Set<DataTypeComponent> getFields(Address address) {
+	public Set<FieldReference> getFields(Address address) {
 		return this.refs.getOrDefault(address, Collections.emptySet());
 	}
 
@@ -135,6 +130,7 @@ public class FieldReferences {
 
 			DecompileOptions xmlOptions = new DecompileOptions();
 			xmlOptions.setDefaultTimeout(60);
+			xmlOptions.setMaxPayloadMBytes​(128);
 			decompiler.setOptions(xmlOptions);
 		}
 	}
@@ -153,86 +149,39 @@ public class FieldReferences {
 			return;
 		}
 
-		ClangTokenGroup tokens = results.getCCodeMarkup();
-		if (tokens == null) {
-			Msg.warn(this, "Failed to decompile " + function.getName());
+		HighFunction highFunc = results.getHighFunction();
+		if (highFunc == null) {
+			Msg.warn(this, results.getErrorMessage());
 			return;
 		}
 
-		for (ClangLine line : DecompilerUtils.toLines(tokens)) {
-			processLine(line);
+		PcodeDataFlow dataFlow = new PcodeDataFlow();
+		Iterable<PcodeOpAST> ops = () -> highFunc.getPcodeOps();
+		for (PcodeOp op : ops) {
+			processPcodeOp(dataFlow, op);
 		}
 	}
 
 	/**
-	 * Process a single line of a decompiled function.
+	 * Process a single pcode instruction.
 	 */
-	private void processLine(ClangLine line) {
-		for (ClangToken token : line.getAllTokens()) {
-			if (token instanceof ClangFieldToken) {
-				processField((ClangFieldToken) token);
-			}
-		}
-	}
-
-	/**
-	 * Process a field access.
-	 */
-	private void processField(ClangFieldToken token) {
-		DataTypeComponent field = getField(token);
-		if (field == null || ignoreDataType(field.getParent())) {
+	private void processPcodeOp(PcodeDataFlow dataFlow, PcodeOp op) {
+		if (op.getOpcode() != PcodeOp.LOAD && op.getOpcode() != PcodeOp.STORE) {
 			return;
 		}
 
-		Address address = getAddress(token);
+		Varnode[] inputs = op.getInputs();
+		// input1: Varnode containing pointer offset (to data|of destination)
+		Varnode ptr = inputs[1];
+
+		Facts facts = dataFlow.getFacts(ptr);
+		Field field = facts.getField();
+		if (field == null) {
+			return;
+		}
+
+		Address address = op.getSeqnum().getTarget();
 		this.refs.computeIfAbsent(address, a -> ConcurrentHashMap.newKeySet())
-			.add(field);
-	}
-
-	/**
-	 * Finds the field associated with a ClangFieldToken.
-	 */
-	private DataTypeComponent getField(ClangFieldToken token) {
-		DataType baseType = DecompilerReference.getBaseType(token.getDataType());
-
-		if (baseType instanceof Structure) {
-			Structure parent = (Structure) baseType;
-			int offset = token.getOffset();
-			if (offset >= 0 && offset < parent.getLength()) {
-				return parent.getComponentAt(offset);
-			}
-		}
-
-		return null;
-	}
-
-	/**
-	 * Finds the address of a field access.
-	 */
-	private Address getAddress(ClangFieldToken token) {
-		// Access DecompilerVariable's protected constructor through an
-		// anonymous subclass
-		return (new DecompilerVariable(token) {}).getAddress();
-	}
-
-	/**
-	 * Check if a struct should be processed.  We are looking for non-system
-	 * DWARF types.
-	 */
-	private boolean ignoreDataType(DataType type) {
-		String name = type.getPathName();
-
-		if (!name.startsWith("/DWARF/")) {
-			return true;
-		}
-
-		if (name.contains("/std/")
-		    || name.contains("/stdlib.h/")
-		    || name.contains("/stdio.h/")
-		    || name.contains("/_UNCATEGORIZED_/")) {
-			return true;
-		}
-
-		return false;
+			.add(new FieldReference(field, facts.isArray()));
 	}
 }

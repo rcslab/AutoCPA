@@ -4,7 +4,6 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
-import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
@@ -60,7 +59,7 @@ public class AccessPatterns {
 
 		// Find access patterns associated with cache misses
 		for (Address baseAddress : this.data.getAddresses()) {
-			Map<Structure, Set<DataTypeComponent>> pattern = new HashMap<>();
+			Map<Structure, Set<Field>> pattern = new HashMap<>();
 			int count = this.data.getCount(baseAddress, BcpiConfig.CACHE_MISS_COUNTER);
 
 			Set<CodeBlock> blocks = getCodeBlocksThrough(baseAddress, monitor);
@@ -71,8 +70,9 @@ public class AccessPatterns {
 						continue;
 					}
 
-					for (DataTypeComponent field : this.refs.getFields(address)) {
-						Structure struct = (Structure) field.getParent();
+					for (FieldReference ref : this.refs.getFields(address)) {
+						Field field = ref.getField();
+						Structure struct = field.getParent();
 						pattern.computeIfAbsent(struct, k -> new HashSet<>())
 							.add(field);
 					}
@@ -84,7 +84,7 @@ public class AccessPatterns {
 				this.attributed += count;
 			}
 
-			for (Map.Entry<Structure, Set<DataTypeComponent>> entry : pattern.entrySet()) {
+			for (Map.Entry<Structure, Set<Field>> entry : pattern.entrySet()) {
 				AccessPattern accessPattern = new AccessPattern(entry.getValue());
 				this.patterns.computeIfAbsent(entry.getKey(), k -> HashMultiset.create())
 					.add(accessPattern, count);
@@ -201,7 +201,7 @@ public class AccessPatterns {
 	/**
 	 * @return The number of accesses we have to this field.
 	 */
-	private int getCount(DataTypeComponent field) {
+	private int getCount(Field field) {
 		int count = 0;
 		Multiset<AccessPattern> patterns = this.patterns.get(field.getParent());
 		if (patterns != null) {
