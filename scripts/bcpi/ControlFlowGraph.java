@@ -293,8 +293,13 @@ public class ControlFlowGraph {
 			beam.clear();
 
 			for (BeamPath parent : parents) {
+				Set<CodeBlockVertex> successors = new HashSet<>();
+				Collection<CodeBlockVertex> children = cfg.getSuccessors(parent.vertex);
+				if (children != null) {
+					successors.addAll(children);
+				}
+
 				int total = 0;
-				Set<CodeBlockVertex> successors = new HashSet<>(cfg.getSuccessors(parent.vertex));
 				for (CodeBlockVertex vertex : successors) {
 					total += getCoverage(vertex);
 				}
