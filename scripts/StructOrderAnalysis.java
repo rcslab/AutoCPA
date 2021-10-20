@@ -377,16 +377,32 @@ class Bucket {
 	/** Maximum one cache line. */
 	private static final int MAX_SIZE = 64;
 
+	private List<Field> fixed;
 	private List<Field> fields;
-	private int size;
 
 	private Bucket(List<Field> fields) {
+		this.fixed = new ArrayList<>();
 		this.fields = ImmutableList.copyOf(fields);
-		this.size = sizeOf(fields);
 	}
 
+	/**
+	 * @return The fields in this bucket.
+	 */
 	List<Field> getFields() {
-		return this.fields;
+		return ImmutableList.<Field>builder()
+			.addAll(this.fixed)
+			.addAll(this.fields)
+			.build();
+	}
+
+	/**
+	 * Add a fixed superclass to the buckets.
+	 */
+	static void addSuperClass(List<Bucket> buckets, Field field) {
+		if (buckets.isEmpty()) {
+			buckets.add(new Bucket(Collections.emptyList()));
+		}
+		buckets.get(0).fixed.add(field);
 	}
 
 	/**
@@ -411,7 +427,7 @@ class Bucket {
 
 		while (!fieldList.isEmpty()) {
 			int i = 1;
-			while (i < fieldList.size() && sizeOf(fieldList.subList(0, i + 1)) <= MAX_SIZE) {
+			while (i < fieldList.size() && sizeOf(Collections.emptyList(), fieldList.subList(0, i + 1)) <= MAX_SIZE) {
 				++i;
 			}
 			buckets.add(new Bucket(fieldList.subList(0, i)));
@@ -429,7 +445,11 @@ class Bucket {
 		newFields.addAll(fields);
 		sort(newFields);
 
-		if (size == 0 || sizeOf(newFields) <= MAX_SIZE) {
+		int slack = this.slack();
+		int size = sizeOf(this.fixed, this.fields);
+		int newSize = sizeOf(this.fixed, newFields);
+
+		if (size == 0 || newSize - size <= slack) {
 			this.fields = newFields;
 			return true;
 		} else {
@@ -452,8 +472,16 @@ class Bucket {
 	/**
 	 * Compute the size of a sequence of fields.
 	 */
-	private static int sizeOf(List<Field> fields) {
+	private static int sizeOf(List<Field> fixed, List<Field> fields) {
 		int size = 0;
+
+		for (Field field : fixed) {
+			int align = field.getDataType().getAlignment();
+			if (size % align != 0) {
+				size += align - (size % align);
+			}
+			size += field.getDataType().getLength();
+		}
 
 		for (Field field : fields) {
 			int align = field.getDataType().getAlignment();
@@ -464,6 +492,21 @@ class Bucket {
 		}
 
 		return size;
+	}
+
+	/**
+	 * Compute the amount of slack in this bucket.
+	 */
+	private int slack() {
+		int size = sizeOf(this.fixed, this.fields);
+
+		// If we exceed MAX_SIZE due to fixed/oversized fields, fill up to the next multiple
+		int rem = size % MAX_SIZE;
+		if (rem == 0 && size != 0) {
+			return 0;
+		} else {
+			return MAX_SIZE - rem;
+		}
 	}
 }
 
@@ -477,6 +520,14 @@ class CostModel {
 	static Structure optimize(AccessPatterns patterns, Structure struct) {
 		Set<Field> added = new HashSet<>();
 		List<Bucket> buckets = new ArrayList<>();
+
+		// Add any missing fields we didn't see get accessed
+		for (Field field : Field.allFields(struct)) {
+			if (field.isSuperClass()) {
+				Bucket.addSuperClass(buckets, field);
+				added.add(field);
+			}
+		}
 
 		// Pack the most common access patterns first
 		for (AccessPattern pattern : patterns.getPatterns(struct)) {

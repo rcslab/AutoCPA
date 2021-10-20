@@ -105,6 +105,15 @@ public class Field {
 	}
 
 	/**
+	 * @return Whether this field represents a superclass.
+	 */
+	public boolean isSuperClass() {
+		// TODO: Ghidra should expose something more reliable
+		String name = getFieldName();
+		return name != null && name.startsWith("super_");
+	}
+
+	/**
 	 * @return The components that make up this field, potentially multiple for bitfields.
 	 */
 	public List<DataTypeComponent> getComponents() {
