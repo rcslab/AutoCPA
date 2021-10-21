@@ -41,6 +41,7 @@ struct util_query_parameter {
 	// Show top n edges when printing call graph.
 	size_t top_n_edge;
 	size_t max_depth;
+	bool dump_graph;
 };
 
 /*
@@ -187,9 +188,20 @@ util_process(util_query_parameter &u)
 			printf("* %ld: %lx (%s) ", value,
 			    get_revised_addr(n->object->path, n->node_address),
 			    n->object->path.c_str());
-		fprintf(f, "%lx,%s=%ld\n",
+		fprintf(f, "%lx,%s=%ld,",
 		    get_revised_addr(n->object->path, n->node_address),
 		    u.counter_name, value);
+		if (u.dump_graph) {
+			std::vector<bcpi_edge *> edges;
+			bcpi_collect_edge(n, edges);
+			bcpi_edge_sort(u.counter_index, edges);
+			for (auto &e : edges) {
+				uint64_t from = get_revised_addr(
+				    n->object->path, e->from->node_address);
+				fprintf(f, "caller %016lx,", from);
+			}
+		}
+		fprintf(f, "\n");
 		if (verbose)
 			bcpi_show_node_info(&records[0], n, u.counter_name);
 	}
@@ -282,6 +294,16 @@ util_process_all(util_query_parameter &u)
 				    records[0].counters[c].c_str(),
 				    n->terminal_counters[c]);
 		}
+		if (u.dump_graph) {
+			std::vector<bcpi_edge *> edges;
+			bcpi_collect_edge(n, edges);
+			bcpi_edge_sort(u.counter_index, edges);
+			for (auto &e : edges) {
+				uint64_t from = get_revised_addr(
+				    n->object->path, e->from->node_address);
+				fprintf(f, "caller %016lx,", from);
+			}
+		}
 		fprintf(f, "\n");
 	}
 	printf("Found %d nodes\n", traverse_node);
@@ -298,6 +320,7 @@ extract_usage()
 	    "Usage: bcpiquery extract [OPTIONS]\n"
 	    "\nOptions:\n"
 	    "\t-h -- Show this help\n"
+	    "\t-g -- Include callgraph\n"
 	    "\t-n n -- Show top n nodes\n"
 	    "\t-d d -- Traverse up to d levels deep\n"
 	    "\t-e e -- Show top e edges\n"
@@ -314,6 +337,7 @@ extract_usage()
 
 static struct option longopts[] = {
 	{ "help", no_argument, NULL, 'h' },
+	{ "graph", no_argument, NULL, 'g' },
 	{ "hostname", required_argument, NULL, 1000 },
 	{ "begin", required_argument, NULL, 1001 },
 	{ "end", required_argument, NULL, 1002 },
@@ -339,15 +363,19 @@ extract_cmd(int argc, char **argv)
 	u.top_n_node = std::numeric_limits<size_t>::max();
 	u.top_n_edge = std::numeric_limits<size_t>::max();
 	u.max_depth = std::numeric_limits<size_t>::max();
+	u.dump_graph = false;
 
-	while ((opt = getopt_long(
-		    argc, argv, "hf:n:d:e:c:o:k:p:v", longopts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "hf:gn:d:e:c:o:k:p:v", longopts,
+		    NULL)) != -1) {
 		switch (opt) {
 		case 'h':
 			extract_usage();
 			return (EX_OK);
 		case 'f':
 			u.files.push_back(optarg);
+			break;
+		case 'g':
+			u.dump_graph = true;
 			break;
 		case 'n':
 			u.top_n_node = atol(optarg);
