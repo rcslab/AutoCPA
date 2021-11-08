@@ -131,8 +131,12 @@ public class ControlFlowGraph {
 			}
 		}
 
-		// The function entry point is the source vertex
+		// Make sure the graph has a unique source
 		CodeBlockVertex source = new CodeBlockVertex("SOURCE");
+		for (CodeBlockVertex vertex : GraphAlgorithms.getSources(this.cfg)) {
+			addEdge(source, vertex);
+		}
+		// The function entry point is always a source vertex
 		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
 			addEdge(source, new CodeBlockVertex(block));
 		}
