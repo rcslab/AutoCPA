@@ -149,11 +149,15 @@ public class StructOrderAnalysis extends GhidraScript {
 				continue;
 			}
 
-			printOriginal(patterns, struct);
+			printAccessPatterns(patterns, struct);
+
+			System.out.print("Original layout:\n\n");
+			printStruct(patterns, struct, struct);
 			int before = CostModel.score(patterns, struct, struct);
 
 			Structure optimized = CostModel.optimize(patterns, struct);
-			printOptimized(optimized);
+			System.out.print("Suggested layout:\n\n");
+			printStruct(patterns, struct, optimized);
 			int after = CostModel.score(patterns, struct, optimized);
 
 			System.out.format("Improvement: %d (before: %d, after: %d)\n", before - after, before, after);
@@ -162,7 +166,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		}
 	}
 
-	private void printOriginal(AccessPatterns patterns, Structure struct) {
+	private void printAccessPatterns(AccessPatterns patterns, Structure struct) {
 		System.out.print("\nAccess patterns:\n\n");
 
 		Set<AccessPattern> structPatterns = patterns.getPatterns(struct);
@@ -174,7 +178,9 @@ public class StructOrderAnalysis extends GhidraScript {
 			}
 			System.out.println();
 		}
+	}
 
+	private void printStruct(AccessPatterns patterns, Structure original, Structure struct) {
 		Table table = new Table();
 		table.addColumn(); // Field type
 		table.addColumn(); // Field name
@@ -185,7 +191,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			.append(struct.getName())
 			.append(" {");
 
-		Map<Integer, Integer> rows = new HashMap<>();
+		Map<String, Integer> rows = new HashMap<>();
 		int padding = 0;
 		for (DataTypeComponent field : struct.getComponents()) {
 			if (Field.isPadding(field)) {
@@ -195,7 +201,7 @@ public class StructOrderAnalysis extends GhidraScript {
 				padding = 0;
 
 				int row = addField(table, field);
-				rows.put(field.getOrdinal(), row);
+				rows.put(field.getFieldName(), row);
 			}
 		}
 		addPadding(table, padding);
@@ -206,12 +212,13 @@ public class StructOrderAnalysis extends GhidraScript {
 			table.get(row, commentCol).append("//");
 		}
 
-		int total = patterns.getCount(struct);
+		Set<AccessPattern> structPatterns = patterns.getPatterns(original);
+		int total = patterns.getCount(original);
 		int count = 0;
 		for (AccessPattern pattern : structPatterns) {
 			int col = table.addColumn();
 
-			int percent = 100 * patterns.getCount(struct, pattern) / total;
+			int percent = 100 * patterns.getCount(original, pattern) / total;
 			table.get(0, col)
 				.append(percent)
 				.append("%");
@@ -219,7 +226,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			for (Field field : pattern.getFields()) {
 				for (DataTypeComponent component : field.getComponents()) {
 					if (!Field.isPadding(component)) {
-						table.get(rows.get(component.getOrdinal()), col).append("*");
+						table.get(rows.get(component.getFieldName()), col).append("*");
 					}
 				}
 			}
@@ -233,32 +240,6 @@ public class StructOrderAnalysis extends GhidraScript {
 			int col = table.addColumn();
 			table.get(0, col).append("...");
 		}
-
-		System.out.print("Original layout:\n\n");
-		System.out.print(table);
-		System.out.print("};\n\n");
-	}
-
-	private void printOptimized(Structure struct) {
-		System.out.print("Suggested layout:\n\n");
-		System.out.format("struct %s {\n", struct.getName());
-
-		Table table = new Table();
-		table.addColumn(); // Field type
-		table.addColumn(); // Field name
-
-		int padding = 0;
-		for (DataTypeComponent field : struct.getComponents()) {
-			if (Field.isPadding(field)) {
-				padding += field.getLength();
-			} else {
-				addPadding(table, padding);
-				padding = 0;
-
-				addField(table, field);
-			}
-		}
-		addPadding(table, padding);
 
 		System.out.print(table);
 		System.out.print("};\n\n");
