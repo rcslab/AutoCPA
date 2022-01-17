@@ -236,13 +236,11 @@ util_process_all(util_query_parameter &u)
 			 * XXX: For now we only support collected data across
 			 * files with matching counter indicies.
 			 */
-			for (int c = 0; c < records[0].counters.size(); c++) {
-				if (record.counters[c] !=
-				    records[0].counters[c]) {
-					fprintf(stderr,
-					    "KNOWN BUG: Unsupported scanning across files with different counter indicies\n");
-					exit(EX_USAGE);
-				}
+			if (!std::equal(record.counters.begin(), record.counters.end(),
+					records[0].counters.begin(), records[0].counters.end())) {
+				fprintf(stderr,
+					"KNOWN BUG: Unsupported scanning across files with different counter indicies\n");
+				exit(EX_USAGE);
 			}
 		}
 
