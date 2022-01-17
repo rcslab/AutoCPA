@@ -2,7 +2,7 @@
 #pragma once
 
 struct util_file_filter {
-	bool verbose;
+	bool verbose = false;
 	std::string bcpi_path;
 	std::string filter_hostname;
 	std::string filter_begin;
