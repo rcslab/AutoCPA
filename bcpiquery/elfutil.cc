@@ -447,8 +447,8 @@ flush_objcache()
 			elf_end(o.second.be);
 		if (o.second.bfd != -1)
 			close(o.second.bfd);
-		objcache.erase(o.first);
 	}
+	objcache.clear();
 }
 
 std::string
