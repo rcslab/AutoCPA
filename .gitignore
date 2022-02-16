@@ -13,5 +13,5 @@ Makefile.local
 /bcpid/bcpid
 /bcpiquery/bcpiquery
 
-/ghidra-projects/
+/ghidra/
 /data/
