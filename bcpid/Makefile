@@ -1,9 +1,15 @@
 PROG_CXX=bcpid
 SRCS= bcpid.cc debug.cc
 
-LDFLAGS= -L../libbcpi -lbcpi -lelf -lkvm -lpmc -lm -lexecinfo -lprocstat -lpthread -lz
+.include <bsd.opts.mk>
 
-bcpid.full: ../libbcpi/libbcpi.a
+.if ${MK_PIE} == "no"
+LIBBCPI=bcpi
+.else
+LIBBCPI=bcpi_pie
+.endif
+
+LDADD=-L../libbcpi -l${LIBBCPI} -lelf -lkvm -lpmc -lm -lexecinfo -lprocstat -lpthread -lz
 
 MAN=
 

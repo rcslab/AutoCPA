@@ -1,5 +1,6 @@
 *.a
 *.o
+*.pieo
 *.po
 *.debug
 *.full

@@ -1,5 +1,6 @@
 LIB= bcpi
 SRCS= libbcpi.cc
+INTERNALLIB= yes
 
 LDADD= -lelf -lz
 

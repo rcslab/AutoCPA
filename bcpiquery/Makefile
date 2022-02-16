@@ -1,9 +1,15 @@
 PROG_CXX=bcpiquery
 SRCS= main.cc check.cc dump.cc extract.cc functions.cc programs.cc elfutil.cc util.cc
 
-LDADD= -L../libbcpi -lz -ldwarf -lelf -lbcpi
+.include <bsd.opts.mk>
 
-bcpiquery: ../libbcpi/libbcpi.a
+.if ${MK_PIE} == "no"
+LIBBCPI=bcpi
+.else
+LIBBCPI=bcpi_pie
+.endif
+
+LDADD= -L../libbcpi -l${LIBBCPI} -lz -ldwarf -lelf
 
 MAN=
 
