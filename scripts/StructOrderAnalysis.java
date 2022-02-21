@@ -11,10 +11,15 @@ import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.data.Array;
+import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
+import ghidra.program.model.data.Enum;
+import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.StructureDataType;
+import ghidra.program.model.data.Union;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
@@ -193,7 +198,17 @@ public class StructOrderAnalysis extends GhidraScript {
 
 		Map<String, Integer> rows = new HashMap<>();
 		int padding = 0;
+		int lastCacheLine = -1;
 		for (DataTypeComponent field : struct.getComponents()) {
+			int cacheLine = field.getOffset() / 64;
+			if (cacheLine != lastCacheLine) {
+				int row = table.addRow();
+				table.get(row, 0)
+					.append("        // Cache line ")
+					.append(cacheLine);
+				lastCacheLine = cacheLine;
+			}
+
 			if (Field.isPadding(field)) {
 				padding += field.getLength();
 			} else {
@@ -246,14 +261,65 @@ public class StructOrderAnalysis extends GhidraScript {
 	}
 
 	private int addField(Table table, DataTypeComponent field) {
+		DataType type = field.getDataType();
+
+		List<Integer> dims = new ArrayList<>();
+		while (type instanceof Array) {
+			Array array = (Array) type;
+			dims.add(array.getNumElements());
+			type = array.getDataType();
+		}
+
+		int bitWidth = -1;
+		if (type instanceof BitFieldDataType) {
+			BitFieldDataType bitField = (BitFieldDataType) type;
+			bitWidth = bitField.getDeclaredBitSize();
+			type = bitField.getBaseDataType();
+		}
+
 		int row = table.addRow();
-		table.get(row, 0)
-			.append("        ")
-			.append(field.getDataType().getName());
-		table.get(row, 1)
-			.append(field.getFieldName())
-			.append(";");
+
+		StringBuilder typeName = table.get(row, 0)
+			.append("        ");
+
+		String specifier = getSpecifier(type);
+		if (specifier != null) {
+			typeName.append(specifier)
+				.append(' ');
+		}
+
+		typeName.append(type.getName());
+
+		StringBuilder name = table.get(row, 1);
+		name.append(field.getFieldName());
+		for (int dim : dims) {
+			name.append("[")
+				.append(dim)
+				.append("]");
+		}
+		if (bitWidth >= 0) {
+			name.append(": ")
+				.append(bitWidth);
+		}
+		name.append(";");
+
 		return row;
+	}
+
+	private String getSpecifier(DataType type) {
+		while (type instanceof Pointer) {
+			type = ((Pointer) type).getDataType();
+		}
+
+		if (type instanceof Structure) {
+			return "struct";
+		} else if (type instanceof Union) {
+			return "union";
+		} else if (type instanceof Enum) {
+			return "enum";
+		} else {
+			return null;
+		}
 	}
 
 	private void addPadding(Table table, int padding) {
@@ -335,16 +401,20 @@ class Table {
 
 		StringBuilder result = new StringBuilder();
 		for (List<StringBuilder> row : this.rows) {
+			StringBuilder line = new StringBuilder();
+
 			for (int i = 0; i < this.nCols; ++i) {
 				StringBuilder cell = row.get(i);
-				result.append(cell);
+				line.append(cell);
 
 				int width = widths.get(i);
 				for (int j = cell.length(); j < width; ++j) {
-					result.append(' ');
+					line.append(' ');
 				}
 			}
-			result.append('\n');
+
+			result.append(line.toString().stripTrailing())
+				.append('\n');
 		}
 
 		return result.toString();
