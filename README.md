@@ -112,6 +112,12 @@ First, merge the debug info into the kernel and modules with
 $ ./scripts/merge-kernel.sh /boot/kernel ./kernel.full
 ```
 
+Or, if you have the obj directory from the kernel build, you can do
+
+```
+$ ./scripts/merge-built-kernel.sh /usr/obj/.../sys/GENERIC ./kernel.full
+```
+
 Then, import the kernel with
 
 ```
