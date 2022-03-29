@@ -598,9 +598,7 @@ class CostModel {
 		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
 		buckets.stream()
 			.flatMap(b -> b.getFields().stream())
-			.flatMap(f -> f.getComponents().stream())
-			.filter(c -> !Field.isPadding(c))
-			.forEach(c -> optimized.add(c.getDataType(), c.getLength(), c.getFieldName(), c.getComment()));
+			.forEach(f -> f.copyTo(optimized));
 		return optimized;
 	}
 

@@ -148,6 +148,37 @@ public class Field {
 		return component.getDataType().equals(DefaultDataType.dataType);
 	}
 
+	/**
+	 * Copy this field into a new structure.
+	 */
+	public void copyTo(Structure struct) {
+		int nFields = struct.getNumComponents();
+		int offset = 0;
+		if (nFields > 0) {
+			DataTypeComponent last = struct.getComponent(nFields - 1);
+			offset = last.getEndOffset() + 1;
+		}
+
+		DataTypeComponent first = this.components.get(0);
+		int align = first.getDataType().getAlignment();
+		if (offset % align != 0) {
+			offset += align - (offset % align);
+		}
+		copyAtOffset(struct, offset, first);
+
+		for (DataTypeComponent field : this.components.subList(1, this.components.size())) {
+			int delta = field.getOffset() - first.getOffset();
+			copyAtOffset(struct, offset + delta, field);
+		}
+	}
+
+	/**
+	 * Copy a (bit)field into a new structure at the given byte offset.
+	 */
+	private static void copyAtOffset(Structure struct, int offset, DataTypeComponent field) {
+		struct.insertAtOffset(offset, field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
+	}
+
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == this) {
