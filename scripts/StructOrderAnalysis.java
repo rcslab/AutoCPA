@@ -202,6 +202,9 @@ public class StructOrderAnalysis extends GhidraScript {
 		for (DataTypeComponent field : struct.getComponents()) {
 			int cacheLine = field.getOffset() / 64;
 			if (cacheLine != lastCacheLine) {
+				addPadding(table, padding);
+				padding = 0;
+
 				int row = table.addRow();
 				table.get(row, 0)
 					.append("        // Cache line ")
