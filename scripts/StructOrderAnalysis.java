@@ -590,7 +590,7 @@ class CostModel {
 
 		// Add any missing fields we didn't see get accessed
 		for (Field field : Field.allFields(struct)) {
-			if (!field.isPadding() && !added.contains(field)) {
+			if (!added.contains(field)) {
 				Bucket.pack(buckets, field);
 			}
 		}

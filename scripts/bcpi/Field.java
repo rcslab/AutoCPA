@@ -41,6 +41,10 @@ public class Field {
 		int offset = 0, endOffset = 0;
 
 		for (DataTypeComponent component : struct.getComponents()) {
+			if (isPadding(component)) {
+				continue;
+			}
+
 			int curOffset = component.getOffset();
 			if (curOffset >= endOffset) {
 				if (!components.isEmpty()) {
@@ -52,10 +56,8 @@ public class Field {
 				offset = curOffset;
 				if (component.isBitFieldComponent()) {
 					type = ((BitFieldDataType) type).getBaseDataType();
-					endOffset = offset + type.getLength();
-				} else {
-					endOffset = component.getEndOffset();
 				}
+				endOffset = offset + type.getLength();
 			}
 
 			components.add(component);
@@ -121,24 +123,17 @@ public class Field {
 	}
 
 	/**
-	 * @return The byte offset of this field in the structure.
+	 * @return The (inclusive) byte offset of this field in the structure.
 	 */
 	public int getOffset() {
 		return this.offset;
 	}
 
 	/**
-	 * @return The byte offset of the end of this field in the structure.
+	 * @return The (exclusive) byte offset of the end of this field in the structure.
 	 */
 	public int getEndOffset() {
 		return this.endOffset;
-	}
-
-	/**
-	 * @return Whether this is a padding field.
-	 */
-	public boolean isPadding() {
-		return type.equals(DefaultDataType.dataType);
 	}
 
 	/**
