@@ -107,6 +107,13 @@ public class Field {
 	}
 
 	/**
+	 * @return The index of this field in the parent structure.
+	 */
+	public int getOrdinal() {
+		return this.components.get(0).getOrdinal();
+	}
+
+	/**
 	 * @return Whether this field represents a superclass.
 	 */
 	public boolean isSuperClass() {

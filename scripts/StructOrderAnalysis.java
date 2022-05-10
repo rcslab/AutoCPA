@@ -425,146 +425,6 @@ class Table {
 }
 
 /**
- * A bucket of fields for structure optimization.
- */
-class Bucket {
-	/** Maximum one cache line. */
-	private static final int MAX_SIZE = 64;
-
-	private List<Field> fixed;
-	private List<Field> fields;
-
-	private Bucket(List<Field> fields) {
-		this.fixed = new ArrayList<>();
-		this.fields = ImmutableList.copyOf(fields);
-	}
-
-	/**
-	 * @return The fields in this bucket.
-	 */
-	List<Field> getFields() {
-		return ImmutableList.<Field>builder()
-			.addAll(this.fixed)
-			.addAll(this.fields)
-			.build();
-	}
-
-	/**
-	 * Add a fixed superclass to the buckets.
-	 */
-	static void addSuperClass(List<Bucket> buckets, Field field) {
-		if (buckets.isEmpty()) {
-			buckets.add(new Bucket(Collections.emptyList()));
-		}
-		buckets.get(0).fixed.add(field);
-	}
-
-	/**
-	 * Add a field into a list of buckets.
-	 */
-	static void pack(List<Bucket> buckets, Field field) {
-		pack(buckets, Collections.singletonList(field));
-	}
-
-	/**
-	 * Add some fields into a list of buckets.
-	 */
-	static void pack(List<Bucket> buckets, Collection<Field> fields) {
-		for (Bucket bucket : buckets) {
-			if (bucket.tryAdd(fields)) {
-				return;
-			}
-		}
-
-		List<Field> fieldList = new ArrayList<>(fields);
-		sort(fieldList);
-
-		while (!fieldList.isEmpty()) {
-			int i = 1;
-			while (i < fieldList.size() && sizeOf(Collections.emptyList(), fieldList.subList(0, i + 1)) <= MAX_SIZE) {
-				++i;
-			}
-			buckets.add(new Bucket(fieldList.subList(0, i)));
-			fieldList = fieldList.subList(i, fieldList.size());
-		}
-	}
-
-	/**
-	 * Try to add some fields to this bucket.
-	 *
-	 * @return Whether the fields were successfully added.
-	 */
-	private boolean tryAdd(Collection<Field> fields) {
-		List<Field> newFields = new ArrayList<>(this.fields);
-		newFields.addAll(fields);
-		sort(newFields);
-
-		int slack = this.slack();
-		int size = sizeOf(this.fixed, this.fields);
-		int newSize = sizeOf(this.fixed, newFields);
-
-		if (size == 0 || newSize - size <= slack) {
-			this.fields = newFields;
-			return true;
-		} else {
-			return false;
-		}
-	}
-
-	/**
-	 * Sort a sequence of fields to reduce holes.
-	 */
-	private static void sort(List<Field> fields) {
-		// Sort by highest alignment first to reduce holes
-		Collections.sort(fields, Comparator
-			.<Field>comparingInt(f -> -f.getDataType().getAlignment())
-			.thenComparingInt(f -> -f.getDataType().getLength())
-			.thenComparing(f -> f.getDataType().getName())
-			.thenComparing(f -> f.getFieldName()));
-	}
-
-	/**
-	 * Compute the size of a sequence of fields.
-	 */
-	private static int sizeOf(List<Field> fixed, List<Field> fields) {
-		int size = 0;
-
-		for (Field field : fixed) {
-			int align = field.getDataType().getAlignment();
-			if (size % align != 0) {
-				size += align - (size % align);
-			}
-			size += field.getDataType().getLength();
-		}
-
-		for (Field field : fields) {
-			int align = field.getDataType().getAlignment();
-			if (size % align != 0) {
-				size += align - (size % align);
-			}
-			size += field.getDataType().getLength();
-		}
-
-		return size;
-	}
-
-	/**
-	 * Compute the amount of slack in this bucket.
-	 */
-	private int slack() {
-		int size = sizeOf(this.fixed, this.fields);
-
-		// If we exceed MAX_SIZE due to fixed/oversized fields, fill up to the next multiple
-		int rem = size % MAX_SIZE;
-		if (rem == 0 && size != 0) {
-			return 0;
-		} else {
-			return MAX_SIZE - rem;
-		}
-	}
-}
-
-/**
  * The simplified cost model for our suggested optimizations.
  */
 class CostModel {
@@ -572,64 +432,104 @@ class CostModel {
 	 * Optimize the layout of a struct according to its access pattern.
 	 */
 	static Structure optimize(AccessPatterns patterns, Structure struct) {
+		List<Field> fields = new ArrayList<>();
 		Set<Field> added = new HashSet<>();
-		List<Bucket> buckets = new ArrayList<>();
 
-		// Add any missing fields we didn't see get accessed
+		// Add superclass fields with fixed positions
 		for (Field field : Field.allFields(struct)) {
 			if (field.isSuperClass()) {
-				Bucket.addSuperClass(buckets, field);
+				fields.add(field);
 				added.add(field);
 			}
 		}
+		int minIndex = fields.size();
 
 		// Pack the most common access patterns first
 		for (AccessPattern pattern : patterns.getPatterns(struct)) {
-			Set<Field> fields = new HashSet<>(pattern.getFields());
-			fields.removeAll(added);
-			Bucket.pack(buckets, fields);
-			added.addAll(fields);
+			pattern.getFields()
+				.stream()
+				.filter(f -> !added.contains(f))
+				.sorted(Comparator.comparingInt(f -> f.getOrdinal()))
+				.forEach(f -> pack(patterns, struct, fields, f, minIndex));
+
+			added.addAll(pattern.getFields());
 		}
 
 		// Add any missing fields we didn't see get accessed
 		for (Field field : Field.allFields(struct)) {
 			if (!added.contains(field)) {
-				Bucket.pack(buckets, field);
+				pack(patterns, struct, fields, field, minIndex);
 			}
 		}
 
-		StructureDataType optimized = new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
-		buckets.stream()
-			.flatMap(b -> b.getFields().stream())
-			.forEach(f -> f.copyTo(optimized));
+		return build(struct, fields);
+	}
+
+	/**
+	 * Pack a new field into a structure.
+	 */
+	private static void pack(AccessPatterns patterns, Structure original, List<Field> fields, Field field, int minIndex) {
+		List<Field> copy = new ArrayList<>(fields);
+		copy.add(field);
+
+		int bestI = -1;
+		int bestScore = -1;
+		for (int i = copy.size() - 1; i >= minIndex; --i) {
+			int newScore = score(patterns, original, build(original, copy));
+			if (bestI < 0 || newScore < bestScore) {
+				bestI = i;
+				bestScore = newScore;
+			}
+
+			if (i > minIndex) {
+				Collections.swap(copy, i - 1, i);
+			}
+		}
+
+		fields.add(bestI, field);
+	}
+
+	/**
+	 * Make a copy of a structure with reordered fields.
+	 */
+	private static Structure build(Structure original, List<Field> fields) {
+		StructureDataType optimized = new StructureDataType(original.getCategoryPath(), original.getName(), 0, original.getDataTypeManager());
+		for (Field field : fields) {
+			field.copyTo(optimized);
+		}
 		return optimized;
 	}
 
 	/**
 	 * Compute the cost of a structure reordering in our simple cache model.
 	 */
-	static int score(AccessPatterns patterns, Structure original, Structure struct) {
+	static int score(AccessPatterns patterns, Structure original, Structure optimized) {
+		List<Field> optFields = Field.allFields(optimized);
 		int score = 0;
 
 		for (AccessPattern pattern : patterns.getPatterns(original)) {
 			Set<Integer> cacheLines = new HashSet<>();
 
 			for (Field field : pattern.getFields()) {
-				int start = 0;
-				int end = 0;
-				for (Field optField : Field.allFields(struct)) {
-					if (Objects.equals(field.getFieldName(), optField.getFieldName())) {
-						start = optField.getOffset();
-						end = optField.getEndOffset();
-						break;
-					}
-				}
-				for (int i = start / 64; i <= (end - 1) / 64; ++i) {
-					cacheLines.add(i);
-				}
+				optFields.stream()
+					.filter(f -> f.getFieldName().equals(field.getFieldName()))
+					.forEach(f -> {
+						int start = f.getOffset();
+						int end = f.getEndOffset();
+						for (int i = start / 64; i <= (end - 1) / 64; ++i) {
+							cacheLines.add(i);
+						}
+					});
 			}
 
 			score += patterns.getCount(original, pattern) * cacheLines.size();
+		}
+
+		// Penalize padding
+		for (DataTypeComponent field : optimized.getComponents()) {
+			if (Field.isPadding(field)) {
+				score += field.getLength();
+			}
 		}
 
 		return score;
