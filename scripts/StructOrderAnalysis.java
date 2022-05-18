@@ -28,6 +28,8 @@ import ghidra.util.task.TaskMonitor;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.SetMultimap;
 
+import java.io.PrintWriter;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -40,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Analyzes cache misses to suggest reorderings of struct fields.
@@ -67,11 +70,9 @@ public class StructOrderAnalysis extends GhidraScript {
 		AccessPatterns patterns = AccessPatterns.collect(data, refs, this.monitor);
 		Msg.info(this, "Found patterns for " + (100.0 * patterns.getHitRate()) + "% of samples");
 
-		if (args.length > 1) {
-			printDetails(patterns, args[1]);
-		} else {
-			printSummary(patterns);
-		}
+		String name = getState().getProject().getName();
+		Path results = Paths.get("./results").resolve(name);
+		render(patterns, results);
 	}
 
 	private List<Program> getAllPrograms() throws Exception {
@@ -90,23 +91,52 @@ public class StructOrderAnalysis extends GhidraScript {
 		}
 	}
 
-	private static class SummaryRow {
-		final Structure struct;
+	/**
+	 * A row in the index.html table.
+	 */
+	private static class IndexRow {
+		final String name;
+		final String href;
 		final int nSamples;
 		final int nPatterns;
 		final int improvement;
 
-		SummaryRow(Structure struct, int nSamples, int nPatterns, int improvement) {
-			this.struct = struct;
+		IndexRow(String name, String href, int nSamples, int nPatterns, int improvement) {
+			this.name = name;
+			this.href = href;
 			this.nSamples = nSamples;
 			this.nPatterns = nPatterns;
 			this.improvement = improvement;
 		}
+
+		@Override
+		public String toString() {
+			return new StringBuilder()
+				.append("<tr>")
+				.append("<td><a href=\"").append(href).append("\"><code>struct ").append(name).append("</code></a></td>")
+				.append("<td style=\"text-align: right;\">").append(String.format("%,d", nSamples)).append("</td>")
+				.append("<td style=\"text-align: right;\">").append(String.format("%,d", nPatterns)).append("</td>")
+				.append("<td style=\"text-align: right;\">").append(String.format("%,d", improvement)).append("</td>")
+				.append("</tr>")
+				.toString();
+		}
 	}
 
-	private void printSummary(AccessPatterns patterns) {
-		List<SummaryRow> rows = new ArrayList<>();
+	/**
+	 * Render all structures to HTML.
+	 */
+	private void render(AccessPatterns patterns, Path results) throws Exception {
+		Path structResults = results.resolve("structs");
+		Files.createDirectories(structResults);
+
+		List<IndexRow> rows = new ArrayList<>();
 		for (Structure struct : patterns.getStructures()) {
+			String name = struct.getName();
+			Structure optimized = CostModel.optimize(patterns, struct);
+
+			Path path = structResults.resolve(name + ".html");
+			renderStructs(struct, optimized, patterns, path);
+
 			int nSamples = 0;
 			int nPatterns = 0;
 			for (AccessPattern pattern : patterns.getPatterns(struct)) {
@@ -114,78 +144,113 @@ public class StructOrderAnalysis extends GhidraScript {
 				nPatterns += 1;
 			}
 
+			String href = results.relativize(path).toString();
 			int before = CostModel.score(patterns, struct, struct);
 			int after = CostModel.score(patterns, struct, CostModel.optimize(patterns, struct));
-			rows.add(new SummaryRow(struct, nSamples, nPatterns, before - after));
+			int improvement = before - after;
+			rows.add(new IndexRow(name, href, nSamples, nPatterns, improvement));
+
 		}
 
 		Collections.sort(rows, Comparator
-			.<SummaryRow>comparingInt(r -> r.improvement)
-			.reversed());
+			.<IndexRow>comparingInt(r -> -r.improvement)
+			.thenComparing(r -> r.name));
 
-		Table table = new Table();
-		table.addColumn(); // Struct name
-		table.addColumn(); // Samples
-		table.addColumn(); // Patterns
-		table.addColumn(); // Improvement
+		Path index = results.resolve("index.html");
+		try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(index))) {
+			out.println("<!DOCTYPE html>");
+			out.println("<html>");
 
-		for (SummaryRow row : rows) {
-			int n = table.addRow();
-			table.get(n, 0)
-				.append(row.struct.getName());
-			table.get(n, 1)
-				.append(row.nSamples)
-				.append(" samples");
-			table.get(n, 2)
-				.append(row.nPatterns)
-				.append(" patterns");
-			table.get(n, 3)
-				.append("improvement: ")
-				.append(row.improvement);
-		}
+			out.println("<head>");
+			String projectName = getState().getProject().getName();
+			out.println("<title>" + projectName + " - BCPI</title>");
+			out.println("</head>");
 
-		System.out.print("Found data for these structs:\n\n");
-		System.out.print(table);
-	}
+			out.println("<body style=\"max-width: 750px; margin: 0 auto;\">");
+			out.println("<table style=\"width: 100%;\">");
+			out.println("<thead>");
+			out.println("<tr style=\"font-weight: bold;\">");
+			out.println("<td>Structure</td>");
+			out.println("<td style=\"text-align: right;\">Samples</td>");
+			out.println("<td style=\"text-align: right;\">Access patterns</td>");
+			out.println("<td style=\"text-align: right;\">Improvement</td>");
+			out.println("</tr>");
+			out.println("</thead>");
+			out.println("<tbody>");
 
-	private void printDetails(AccessPatterns patterns, String filterRegex) {
-		for (Structure struct : patterns.getStructures()) {
-			if (!struct.getName().matches(filterRegex)) {
-				continue;
+			for (IndexRow row : rows) {
+				out.println(row);
 			}
 
-			printAccessPatterns(patterns, struct);
+			out.println("</tbody>");
+			out.println("</table>");
+			out.println("</body>");
 
-			System.out.print("Original layout:\n\n");
-			printStruct(patterns, struct, struct);
-			int before = CostModel.score(patterns, struct, struct);
+			out.println("</html>");
+		}
 
-			Structure optimized = CostModel.optimize(patterns, struct);
-			System.out.print("Suggested layout:\n\n");
-			printStruct(patterns, struct, optimized);
-			int after = CostModel.score(patterns, struct, optimized);
+		System.out.println("Results available in " + index);
+	}
 
-			System.out.format("Improvement: %d (before: %d, after: %d)\n", before - after, before, after);
+	/**
+	 * Render the pre- and post-optimization structure layouts to HTML.
+	 */
+	private void renderStructs(Structure before, Structure after, AccessPatterns patterns, Path path) throws Exception {
+		try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(path))) {
+			out.println("<!DOCTYPE html>");
+			out.println("<html>");
 
-			System.out.print("\n---\n");
+			out.println("<head>");
+			String projectName = getState().getProject().getName();
+			out.println("<title>struct " + before.getName() + " - " + projectName + " - BCPI</title>");
+			out.println("<style>");
+			out.println("body {");
+			out.println("    margin: 0;");
+			out.println("}");
+			out.println(".column {");
+			out.println("    padding: 0 8px;");
+			out.println("    max-height: 100vh;");
+			out.println("    overflow-y: scroll;");
+			out.println("}");
+			out.println(".highlight {");
+			out.println("    background-color: lightgray;");
+			out.println("    transition: all 0.2s;");
+			out.println("}");
+			out.println("pre .highlight {");
+			out.println("    font-weight: bold;");
+			out.println("}");
+			out.println("</style>");
+			out.println("</head>");
+
+			out.println("<body>");
+			out.println("<main style=\"display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: auto; grid-column-gap: 8px;\">");
+
+			out.println("<div class=\"column\" style=\"grid-area: 1 / 1 / 2 / 2;\">");
+			out.println("<p><strong>Access patterns:</strong></p>");
+			renderAccessPatterns(before, patterns, out);
+			out.println("</div>");
+
+			out.println("<div class=\"column\" style=\"grid-area: 1 / 2 / 2 / 3;\">");
+			out.println("<p><strong>Before:</strong></p>");
+			renderStruct(before, before, patterns, out);
+			out.println("</div>");
+
+			out.println("<div class=\"column\" style=\"grid-area: 1 / 3 / 2 / 4;\">");
+			out.println("<p><strong>After:</strong></p>");
+			renderStruct(before, after, patterns, out);
+			out.println("</div>");
+
+			out.println("</main>");
+			out.println("</body>");
+
+			out.println("</html>");
 		}
 	}
 
-	private void printAccessPatterns(AccessPatterns patterns, Structure struct) {
-		System.out.print("\nAccess patterns:\n\n");
-
-		Set<AccessPattern> structPatterns = patterns.getPatterns(struct);
-		for (AccessPattern pattern : structPatterns) {
-			int count = patterns.getCount(struct, pattern);
-			System.out.format("%s (%d times)\n", pattern, count);
-			for (Function func : patterns.getFunctions(pattern)) {
-				System.out.format("\t- %s()\n", func.getName());
-			}
-			System.out.println();
-		}
-	}
-
-	private void printStruct(AccessPatterns patterns, Structure original, Structure struct) {
+	/**
+	 * Render a structure layout to HTML.
+	 */
+	private void renderStruct(Structure original, Structure struct, AccessPatterns patterns, PrintWriter out) throws Exception {
 		Table table = new Table();
 		table.addColumn(); // Field type
 		table.addColumn(); // Field name
@@ -197,6 +262,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			.append(" {");
 
 		Map<String, Integer> rows = new HashMap<>();
+		Map<Integer, String> fields = new HashMap<>();
 		int padding = 0;
 		int lastCacheLine = -1;
 		for (DataTypeComponent field : struct.getComponents()) {
@@ -207,7 +273,7 @@ public class StructOrderAnalysis extends GhidraScript {
 
 				int row = table.addRow();
 				table.get(row, 0)
-					.append("        // Cache line ")
+					.append("\t// Cache line ")
 					.append(cacheLine);
 				lastCacheLine = cacheLine;
 			}
@@ -220,6 +286,7 @@ public class StructOrderAnalysis extends GhidraScript {
 
 				int row = addField(table, field);
 				rows.put(field.getFieldName(), row);
+				fields.put(row, field.getFieldName());
 			}
 		}
 		addPadding(table, padding);
@@ -259,8 +326,30 @@ public class StructOrderAnalysis extends GhidraScript {
 			table.get(0, col).append("...");
 		}
 
-		System.out.print(table);
-		System.out.print("};\n\n");
+		out.println("<pre>");
+
+		Iterable<String> lines = () -> table.toString().lines().iterator();
+		int row = 0;
+		for (String line : lines) {
+			String field = fields.get(row);
+			if (field != null) {
+				out.format("<span class=\"field-%s\"", field);
+				out.format(" onmouseenter=\"document.querySelectorAll('.field-%s').forEach(e => e.classList.add('highlight'));\"", field);
+				out.format(" onmouseleave=\"document.querySelectorAll('.field-%s').forEach(e => e.classList.remove('highlight'));\">", field);
+			}
+
+			out.print(line);
+
+			if (field != null) {
+				out.print("</span>");
+			}
+			out.println();
+
+			++row;
+		}
+
+		out.println("}");
+		out.println("</pre>");
 	}
 
 	private int addField(Table table, DataTypeComponent field) {
@@ -283,7 +372,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		int row = table.addRow();
 
 		StringBuilder typeName = table.get(row, 0)
-			.append("        ");
+			.append("\t");
 
 		String specifier = getSpecifier(type);
 		if (specifier != null) {
@@ -329,12 +418,45 @@ public class StructOrderAnalysis extends GhidraScript {
 		if (padding != 0) {
 			int row = table.addRow();
 			table.get(row, 0)
-				.append("        // char");
+				.append("\t// char");
 			table.get(row, 1)
 				.append("padding[")
 				.append(padding)
 				.append("];");
 		}
+	}
+
+	/**
+	 * Render the list of access patterns for a structure to HTML.
+	 */
+	private void renderAccessPatterns(Structure struct, AccessPatterns patterns, PrintWriter out) {
+		out.println("<ul>");
+
+		int total = patterns.getCount(struct);
+		Set<AccessPattern> structPatterns = patterns.getPatterns(struct);
+		for (AccessPattern pattern : structPatterns) {
+			String selector = pattern.getFields()
+				.stream()
+				.flatMap(f -> f.getComponents().stream())
+				.map(c -> ".field-" + c.getFieldName())
+				.collect(Collectors.joining(", "));
+
+			out.format("<li style=\"margin-top: 8px;\"");
+			out.format(" onmouseenter=\"[this, ...document.querySelectorAll('%s')].forEach(e => e.classList.add('highlight'));\"", selector);
+			out.format(" onmouseleave=\"[this, ...document.querySelectorAll('%s')].forEach(e => e.classList.remove('highlight'));\">", selector);
+
+			int count = patterns.getCount(struct, pattern);
+			int percent = 100 * count / total;
+			out.format("%d%% (%,d times)<br><code>%s</code>\n", percent, count, pattern);
+
+			out.println("<ul>");
+			for (Function func : patterns.getFunctions(pattern)) {
+				out.format("<li><code>%s()</code>\n", func.getName());
+			}
+			out.println("</ul>");
+		}
+
+		out.println("</ul>");
 	}
 }
 
@@ -388,13 +510,22 @@ class Table {
 		return this.rows.get(row).get(col);
 	}
 
+	/**
+	 * @return The width of a column of text, taking leading tabs into account.
+	 */
+	private static int width(CharSequence string) {
+		return string.codePoints()
+			.map(c -> c == '\t' ? 8 : 1)
+			.sum();
+	}
+
 	@Override
 	public String toString() {
 		List<Integer> widths = new ArrayList<>();
 		for (int i = 0; i < this.nCols; ++i) {
 			int width = 0;
 			for (List<StringBuilder> row : this.rows) {
-				int curWidth = row.get(i).length();
+				int curWidth = Table.width(row.get(i));
 				if (width < curWidth) {
 					width = curWidth;
 				}
@@ -411,7 +542,7 @@ class Table {
 				line.append(cell);
 
 				int width = widths.get(i);
-				for (int j = cell.length(); j < width; ++j) {
+				for (int j = Table.width(cell); j < width; ++j) {
 					line.append(' ');
 				}
 			}

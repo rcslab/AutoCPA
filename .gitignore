@@ -16,3 +16,4 @@ Makefile.local
 
 /ghidra/
 /data/
+/results/
