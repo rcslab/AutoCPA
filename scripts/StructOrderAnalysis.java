@@ -146,10 +146,9 @@ public class StructOrderAnalysis extends GhidraScript {
 
 			String href = results.relativize(path).toString();
 			int before = CostModel.score(patterns, struct, struct);
-			int after = CostModel.score(patterns, struct, CostModel.optimize(patterns, struct));
+			int after = CostModel.score(patterns, struct, optimized);
 			int improvement = before - after;
 			rows.add(new IndexRow(name, href, nSamples, nPatterns, improvement));
-
 		}
 
 		Collections.sort(rows, Comparator
