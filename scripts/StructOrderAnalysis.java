@@ -4,6 +4,7 @@ import bcpi.BcpiConfig;
 import bcpi.BcpiData;
 import bcpi.BcpiDataRow;
 import bcpi.ControlFlowGraph;
+import bcpi.DataTypes;
 import bcpi.Field;
 import bcpi.FieldReferences;
 
@@ -15,6 +16,7 @@ import ghidra.program.model.data.Array;
 import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
+import ghidra.program.model.data.DefaultDataType;
 import ghidra.program.model.data.Enum;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
@@ -627,9 +629,18 @@ class CostModel {
 	 */
 	private static Structure build(Structure original, List<Field> fields) {
 		StructureDataType optimized = new StructureDataType(original.getCategoryPath(), original.getName(), 0, original.getDataTypeManager());
+
 		for (Field field : fields) {
 			field.copyTo(optimized);
 		}
+
+		// Add trailing padding
+		int align = DataTypes.getAlignment(original);
+		int slop = align - (optimized.getLength() % align);
+		if (slop != align) {
+			optimized.add(DefaultDataType.dataType, slop);
+		}
+
 		return optimized;
 	}
 
@@ -658,10 +669,14 @@ class CostModel {
 			score += patterns.getCount(original, pattern) * cacheLines.size();
 		}
 
-		// Penalize padding
+		// Penalize internal padding
+		int padding = 0;
 		for (DataTypeComponent field : optimized.getComponents()) {
 			if (Field.isPadding(field)) {
-				score += field.getLength();
+				padding += field.getLength();
+			} else {
+				score += padding;
+				padding = 0;
 			}
 		}
 
