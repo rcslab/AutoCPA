@@ -14,6 +14,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
 import com.google.common.collect.SetMultimap;
+import com.google.common.collect.Sets;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -59,7 +60,8 @@ public class AccessPatterns {
 
 		// Find access patterns associated with cache misses
 		for (Address baseAddress : this.data.getAddresses()) {
-			Map<Structure, Set<Field>> pattern = new HashMap<>();
+			Map<Structure, Set<Field>> reads = new HashMap<>();
+			Map<Structure, Set<Field>> writes = new HashMap<>();
 			int count = this.data.getCount(baseAddress, BcpiConfig.CACHE_MISS_COUNTER);
 
 			Set<CodeBlock> blocks = getCodeBlocksThrough(baseAddress, monitor);
@@ -73,22 +75,26 @@ public class AccessPatterns {
 					for (FieldReference ref : this.refs.getFields(address)) {
 						Field field = ref.getField();
 						Structure struct = field.getParent();
-						pattern.computeIfAbsent(struct, k -> new HashSet<>())
+						(ref.isRead() ? reads : writes)
+							.computeIfAbsent(struct, k -> new HashSet<>())
 							.add(field);
 					}
 				}
 			}
 
 			this.samples += count;
-			if (!pattern.isEmpty()) {
+			if (!reads.isEmpty() || !writes.isEmpty()) {
 				this.attributed += count;
 			}
 
-			for (Map.Entry<Structure, Set<Field>> entry : pattern.entrySet()) {
-				AccessPattern accessPattern = new AccessPattern(entry.getValue());
-				this.patterns.computeIfAbsent(entry.getKey(), k -> HashMultiset.create())
-					.add(accessPattern, count);
-				this.functions.put(accessPattern, this.data.getRow(baseAddress).function);
+			for (Structure struct : Sets.union(reads.keySet(), writes.keySet())) {
+				Set<Field> read = reads.getOrDefault(struct, Collections.emptySet());
+				Set<Field> written = writes.getOrDefault(struct, Collections.emptySet());
+				AccessPattern pattern = new AccessPattern(read, written);
+				this.patterns
+					.computeIfAbsent(struct, k -> HashMultiset.create())
+					.add(pattern, count);
+				this.functions.put(pattern, this.data.getRow(baseAddress).function);
 			}
 		}
 	}

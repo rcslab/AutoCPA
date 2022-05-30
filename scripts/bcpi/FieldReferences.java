@@ -169,6 +169,7 @@ public class FieldReferences {
 		if (op.getOpcode() != PcodeOp.LOAD && op.getOpcode() != PcodeOp.STORE) {
 			return;
 		}
+		boolean isRead = op.getOpcode() == PcodeOp.LOAD;
 
 		Varnode[] inputs = op.getInputs();
 		// input1: Varnode containing pointer offset (to data|of destination)
@@ -182,6 +183,6 @@ public class FieldReferences {
 
 		Address address = op.getSeqnum().getTarget();
 		this.refs.computeIfAbsent(address, a -> ConcurrentHashMap.newKeySet())
-			.add(new FieldReference(field, facts.isArray()));
+			.add(new FieldReference(field, facts.isArray(), isRead));
 	}
 }

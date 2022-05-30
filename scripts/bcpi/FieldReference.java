@@ -8,10 +8,12 @@ import java.util.Objects;
 public class FieldReference {
 	private final Field field;
 	private final boolean arrayAccess;
+	private final boolean isRead;
 
-	FieldReference(Field field, boolean arrayAccess) {
+	FieldReference(Field field, boolean arrayAccess, boolean isRead) {
 		this.field = field;
 		this.arrayAccess = arrayAccess;
+		this.isRead = isRead;
 	}
 
 	/** The field being accessed. */
@@ -24,6 +26,11 @@ public class FieldReference {
 		return this.arrayAccess;
 	}
 
+	/** Whether this access was a read access. */
+	public boolean isRead() {
+		return this.isRead;
+	}
+
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == this) {
@@ -34,12 +41,13 @@ public class FieldReference {
 
 		FieldReference other = (FieldReference) obj;
 		return this.field.equals(other.field)
-			&& this.arrayAccess == other.arrayAccess;
+			&& this.arrayAccess == other.arrayAccess
+			&& this.isRead == other.isRead;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(this.field, this.arrayAccess);
+		return Objects.hash(this.field, this.arrayAccess, this.isRead);
 	}
 
 	@Override
@@ -47,6 +55,7 @@ public class FieldReference {
 		String parent = this.field.getParent().getName();
 		String array = this.arrayAccess ? "[]" : "";
 		String name = this.field.getFieldName();
-		return String.format("%s%s::%s", parent, array, name);
+		String rw = this.isRead ? "R" : "W";
+		return String.format("%s%s::%s(%s)", parent, array, name, rw);
 	}
 }

@@ -309,10 +309,13 @@ public class StructOrderAnalysis extends GhidraScript {
 				.append("%");
 
 			for (Field field : pattern.getFields()) {
+				boolean read = pattern.getReadFields().contains(field);
+				boolean written = pattern.getWrittenFields().contains(field);
+
 				for (DataTypeComponent component : field.getComponents()) {
-					if (!Field.isPadding(component)) {
-						table.get(rows.get(component.getFieldName()), col).append("*");
-					}
+					StringBuilder str = table.get(rows.get(component.getFieldName()), col);
+					str.append(read ? "R" : " ");
+					str.append(written ? "W" : " ");
 				}
 			}
 
