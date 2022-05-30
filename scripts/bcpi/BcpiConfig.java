@@ -24,6 +24,9 @@ public class BcpiConfig {
 	/** Number of paths to use from beam search. */
 	public static final int BEAM_PATHS = intEnv("BCPI_BEAM_PATHS", 1);
 
+	/** Whether to assume structures are allocated at the beginning of cache lines. */
+	public static final boolean ASSUME_CACHE_ALIGNED = checkEnv("BCPI_ASSUME_CACHE_ALIGNED");
+
 	/**
 	 * Check if a setting has been enabled through an environment variable.
 	 */

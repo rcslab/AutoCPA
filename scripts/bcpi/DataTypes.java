@@ -3,6 +3,7 @@ package bcpi;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypePath;
 import ghidra.program.model.data.Pointer;
+import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.TypeDef;
 import ghidra.util.Msg;
 
@@ -61,5 +62,16 @@ public class DataTypes {
 			.map(DataTypes::resolve)
 			.filter(t -> t instanceof Pointer)
 			.map(t -> ((Pointer) t).getDataType());
+	}
+
+	/**
+	 * Get the byte alignment of a structure.
+	 */
+	public static int getAlignment(Structure struct) {
+		int align = struct.getAlignment();
+		for (Field field : Field.allFields(struct)) {
+			align = Math.max(align, field.getDataType().getAlignment());
+		}
+		return align;
 	}
 }
