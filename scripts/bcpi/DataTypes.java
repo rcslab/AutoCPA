@@ -1,21 +1,27 @@
 package bcpi;
 
+import ghidra.program.model.data.Array;
 import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DataTypePath;
+import ghidra.program.model.data.Enum;
+import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.TypeDef;
+import ghidra.program.model.data.Union;
 import ghidra.util.Msg;
 
 import com.google.common.base.Equivalence;
 import com.google.common.base.Throwables;
 
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
 /**
  * Utilities for working with data types.
@@ -144,6 +150,130 @@ public class DataTypes {
 			}
 
 			struct.insertAtOffset(offset, type, field.getLength(), field.getFieldName(), field.getComment());
+		}
+	}
+
+	/**
+	 * Unwrap any arrays, pointers, etc. from a type.
+	 */
+	public static DataType undecorate(DataType type) {
+		while (true) {
+			if (type instanceof Array) {
+				type = ((Array) type).getDataType();
+			} else if (type instanceof BitFieldDataType) {
+				type = ((BitFieldDataType) type).getBaseDataType();
+			} else if (type instanceof FunctionDefinition) {
+				type = ((FunctionDefinition) type).getReturnType();
+			} else if (type instanceof Pointer) {
+				type = ((Pointer) type).getDataType();
+			} else {
+				break;
+			}
+		}
+
+		return type;
+	}
+
+	/**
+	 * Format a C type.
+	 */
+	public static String formatCDecl(DataType type) {
+		return formatCDecl(type, "");
+	}
+
+	/**
+	 * Format a C declaration.
+	 */
+	public static String formatCDecl(DataType type, String name) {
+		StringBuilder spec = new StringBuilder();
+		StringBuilder decl = new StringBuilder();
+		formatCDecl(type, name, spec, decl);
+
+		if (decl.length() > 0) {
+			spec.append(" ").append(decl);
+		}
+
+		return spec.toString();
+	}
+
+	/**
+	 * Format a C declaration into a separate specifier and declarator.
+	 */
+	public static void formatCDecl(DataType type, String name, StringBuilder specifier, StringBuilder declarator) {
+		declarator.append(name);
+
+		while (true) {
+			if (type instanceof Array) {
+				Array array = (Array) type;
+				type = array.getDataType();
+				declarator
+					.append("[")
+					.append(array.getNumElements())
+					.append("]");
+			} else if (type instanceof BitFieldDataType) {
+				BitFieldDataType bitField = (BitFieldDataType) type;
+				type = bitField.getBaseDataType();
+				declarator
+					.append(" : ")
+					.append(bitField.getDeclaredBitSize());
+			} else if (type instanceof FunctionDefinition) {
+				FunctionDefinition func = (FunctionDefinition) type;
+				type = func.getReturnType();
+
+				declarator.append(Arrays.stream(func.getArguments())
+					.map(p -> formatCDecl(p.getDataType()))
+					.collect(Collectors.joining(", ", "(", ")")));
+			} else if (type instanceof Pointer) {
+				type = ((Pointer) type).getDataType();
+
+				if (type instanceof Array || type instanceof FunctionDefinition) {
+					declarator
+						.insert(0, "(*")
+						.append(")");
+				} else {
+					declarator.insert(0, "*");
+				}
+			} else {
+				break;
+			}
+		}
+
+		String typeName = type.getName();
+		if (typeName.endsWith(DataType.CONFLICT_SUFFIX)) {
+			typeName = typeName.substring(0, typeName.length() - DataType.CONFLICT_SUFFIX.length());
+		}
+
+		if (type instanceof Enum) {
+			specifier.append("enum ");
+
+			if (typeName.startsWith("anon_enum_")) {
+				specifier.append("{ ... }");
+			} else {
+				specifier.append(typeName);
+			}
+		} else if (type instanceof Structure) {
+			specifier.append("struct ");
+
+			if (typeName.startsWith("anon_struct_")) {
+				specifier.append("{ ... }");
+			} else {
+				specifier.append(typeName);
+			}
+		} else if (type instanceof Union) {
+			specifier.append("union ");
+
+			if (typeName.startsWith("anon_union_")) {
+				specifier.append("{ ... }");
+			} else {
+				specifier.append(typeName);
+			}
+		} else if (typeName.startsWith("anon_subr_")) {
+			specifier.append("...");
+			declarator
+				.insert(0, "(*")
+				.append(")(...)");
+		} else {
+			specifier.append(typeName);
 		}
 	}
 }
