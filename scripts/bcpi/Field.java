@@ -46,7 +46,7 @@ public class Field {
 			}
 
 			int curOffset = component.getOffset();
-			if (curOffset >= endOffset) {
+			if (curOffset >= endOffset || !component.isBitFieldComponent()) {
 				if (!components.isEmpty()) {
 					fields.add(new Field(struct, type, offset, endOffset, components));
 					components.clear();
