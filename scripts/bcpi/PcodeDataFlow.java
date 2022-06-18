@@ -1,23 +1,19 @@
 package bcpi;
 
-import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
-import ghidra.program.model.data.TypeDef;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
 import java.util.Arrays;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Data Flow analysis on Ghidra pcode.
  */
 class PcodeDataFlow {
-	private final HashMap<Varnode, Facts> cache = new HashMap<>();
+	private final Map<Varnode, Facts> cache = new HashMap<>();
 
 	/**
 	 * Compute data flow facts for a varnode.
@@ -81,21 +77,17 @@ class PcodeDataFlow {
 					break;
 				}
 
-				DataType type = base.getHigh().getDataType();
-				if (type instanceof TypeDef) {
-					type = ((TypeDef) type).getBaseDataType();
-				}
-				if (type instanceof Pointer) {
-					type = ((Pointer) type).getDataType();
-				}
-				if (type instanceof TypeDef) {
-					type = ((TypeDef) type).getBaseDataType();
-				}
-				if (!(type instanceof Structure)) {
+				Structure struct = (Structure) Optional
+					.ofNullable(base.getHigh().getDataType()) // Get the type of the pointer varnode
+					.flatMap(DataTypes::dereference)          // Dereference it
+					.map(DataTypes::resolve)                  // Resolve typedefs
+					.filter(t -> t instanceof Structure)      // Filter out non-structs
+					.map(DataTypes::dedup)                    // Deduplicate it
+					.orElse(null);
+				if (struct == null) {
 					break;
 				}
 
-				Structure struct = (Structure) type;
 				int fieldOffset = (int) offset.getOffset();
 				Field field = Field.atOffset(struct, fieldOffset);
 				if (field == null) {
