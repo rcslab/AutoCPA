@@ -8,6 +8,7 @@ import bcpi.DataTypes;
 import bcpi.Field;
 import bcpi.FieldReferences;
 import bcpi.Linker;
+import bcpi.StructAbiConstraints;
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
@@ -23,9 +24,11 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
 import com.google.common.base.Throwables;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.SetMultimap;
 import com.google.common.html.HtmlEscapers;
 
@@ -42,15 +45,188 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
+ * An ABI constraint argument.
+ */
+interface ConstraintArg {
+	String getType();
+
+	void apply(StructAbiConstraints constraints);
+}
+
+/**
+ * A field group constraint.
+ */
+class FieldGroupConstraint implements ConstraintArg {
+	private static final Pattern PATTERN = Pattern.compile("(\\w+)::group\\((\\w+)\\)=(\\d+)");
+
+	private final String type;
+	private final String field;
+	private final int group;
+
+	private FieldGroupConstraint(String type, String field, int group) {
+		this.type = type;
+		this.field = field;
+		this.group = group;
+	}
+
+	static Optional<FieldGroupConstraint> parse(String arg) {
+		Matcher matcher = PATTERN.matcher(arg);
+		if (!matcher.matches()) {
+			return Optional.empty();
+		}
+
+		String type = matcher.group(1);
+		String field = matcher.group(2);
+		int group = Integer.parseInt(matcher.group(3));
+		return Optional.of(new FieldGroupConstraint(type, field, group));
+	}
+
+	@Override
+	public String getType() {
+		return this.type;
+	}
+
+	@Override
+	public void apply(StructAbiConstraints constraints) {
+		constraints.setGroup(this.field, this.group);
+	}
+}
+
+/**
+ * A field range group constraint.
+ */
+class RangeGroupConstraint implements ConstraintArg {
+	private static final Pattern PATTERN = Pattern.compile("(\\w+)::group\\((\\w+)-(\\w+)\\)=(\\d+)");
+
+	private final String type;
+	private final String first;
+	private final String last;
+	private final int group;
+
+	private RangeGroupConstraint(String type, String first, String last, int group) {
+		this.type = type;
+		this.first = first;
+		this.last = last;
+		this.group = group;
+	}
+
+	static Optional<RangeGroupConstraint> parse(String arg) {
+		Matcher matcher = PATTERN.matcher(arg);
+		if (!matcher.matches()) {
+			return Optional.empty();
+		}
+
+		String type = matcher.group(1);
+		String first = matcher.group(2);
+		String last = matcher.group(3);
+		int group = Integer.parseInt(matcher.group(4));
+		return Optional.of(new RangeGroupConstraint(type, first, last, group));
+	}
+
+	@Override
+	public String getType() {
+		return this.type;
+	}
+
+	@Override
+	public void apply(StructAbiConstraints constraints) {
+		constraints.setRangeGroup(this.first, this.last, this.group);
+	}
+}
+
+/**
+ * A relative group order constraint.
+ */
+class GroupOrderConstraint implements ConstraintArg {
+	private static final Pattern PATTERN = Pattern.compile("(\\w+)::group\\((\\d+)\\)<group\\((\\d+)\\)");
+
+	private final String type;
+	private final int before;
+	private final int after;
+
+	private GroupOrderConstraint(String type, int before, int after) {
+		this.type = type;
+		this.before = before;
+		this.after = after;
+	}
+
+	static Optional<GroupOrderConstraint> parse(String arg) {
+		Matcher matcher = PATTERN.matcher(arg);
+		if (!matcher.matches()) {
+			return Optional.empty();
+		}
+
+		String type = matcher.group(1);
+		int before = Integer.parseInt(matcher.group(2));
+		int after = Integer.parseInt(matcher.group(3));
+		return Optional.of(new GroupOrderConstraint(type, before, after));
+	}
+
+	@Override
+	public String getType() {
+		return this.type;
+	}
+
+	@Override
+	public void apply(StructAbiConstraints constraints) {
+		constraints.orderGroups(this.before, this.after);
+	}
+}
+
+/**
+ * A fixed field constraint.
+ */
+class FixedFieldConstraint implements ConstraintArg {
+	private static final Pattern PATTERN = Pattern.compile("(\\w+)::fixed\\((\\w+)\\)=(\\d+)");
+
+	private final String type;
+	private final String field;
+	private final int index;
+
+	private FixedFieldConstraint(String type, String field, int index) {
+		this.type = type;
+		this.field = field;
+		this.index = index;
+	}
+
+	static Optional<FixedFieldConstraint> parse(String arg) {
+		Matcher matcher = PATTERN.matcher(arg);
+		if (!matcher.matches()) {
+			return Optional.empty();
+		}
+
+		String type = matcher.group(1);
+		String field = matcher.group(2);
+		int index = Integer.parseInt(matcher.group(3));
+		return Optional.of(new FixedFieldConstraint(type, field, index));
+	}
+
+	@Override
+	public String getType() {
+		return this.type;
+	}
+
+	@Override
+	public void apply(StructAbiConstraints constraints) {
+		constraints.setFixed(this.field, this.index);
+	}
+}
+
+/**
  * Analyzes cache misses to suggest reorderings of struct fields.
  */
 public class StructOrderAnalysis extends GhidraScript {
+	private ListMultimap<String, ConstraintArg> constraints = ArrayListMultimap.create();
+
 	@Override
 	public void run() throws Exception {
 		List<Program> programs = getAllPrograms();
@@ -59,6 +235,25 @@ public class StructOrderAnalysis extends GhidraScript {
 		String[] args = getScriptArgs();
 		Path csv = Paths.get(args[0]);
 		BcpiData data = BcpiData.parse(csv, programs);
+
+		// Process command line arguments
+		for (int i = 1; i < args.length; ++i) {
+			String arg = args[i];
+
+			Optional<ConstraintArg> parsed = Optional.<ConstraintArg>empty()
+				.or(() -> FieldGroupConstraint.parse(arg))
+				.or(() -> RangeGroupConstraint.parse(arg))
+				.or(() -> GroupOrderConstraint.parse(arg))
+				.or(() -> FixedFieldConstraint.parse(arg));
+
+			if (parsed.isPresent()) {
+				ConstraintArg constraint = parsed.get();
+				this.constraints.put(constraint.getType(), constraint);
+			} else {
+				Msg.error(this, "Unsupported command line argument " + arg);
+				return;
+			}
+		}
 
 		// Get the decompilation of each function containing an address
 		// for which we have data.  This is much faster than calling
@@ -216,7 +411,13 @@ public class StructOrderAnalysis extends GhidraScript {
 			.parallelStream()
 			.map(struct -> {
                                 String name = struct.getName();
-				Structure optimized = CostModel.optimize(patterns, struct);
+
+				StructAbiConstraints constraints = new StructAbiConstraints(struct);
+				for (ConstraintArg arg : this.constraints.get(name)) {
+					arg.apply(constraints);
+				}
+
+				Structure optimized = CostModel.optimize(patterns, struct, constraints);
 
 				Path path = structResults.resolve(sanitizeFileName(name) + ".html");
 				renderStructs(struct, optimized, patterns, path);
@@ -881,34 +1082,34 @@ class CostModel {
 	/**
 	 * Optimize the layout of a struct according to its access pattern.
 	 */
-	static Structure optimize(AccessPatterns patterns, Structure struct) {
+	static Structure optimize(AccessPatterns patterns, Structure struct, StructAbiConstraints constraints) {
+		List<Field> origFields = Field.allFields(struct);
 		List<Field> fields = new ArrayList<>();
 		Set<Field> added = new HashSet<>();
 
-		// Add superclass fields with fixed positions
-		for (Field field : Field.allFields(struct)) {
-			if (field.isSuperClass()) {
-				fields.add(field);
+		// Add fields with fixed positions first
+		for (Field field : origFields) {
+			if (constraints.isFixed(field)) {
+				pack(patterns, struct, fields, field, constraints);
 				added.add(field);
 			}
 		}
-		int minIndex = fields.size();
 
-		// Pack the most common access patterns first
+		// Then access patterns from most common to least
 		for (AccessPattern pattern : patterns.getPatterns(struct)) {
 			pattern.getFields()
 				.stream()
 				.filter(f -> !added.contains(f))
 				.sorted(Comparator.comparingInt(f -> f.getOrdinal()))
-				.forEach(f -> pack(patterns, struct, fields, f, minIndex));
+				.forEach(f -> pack(patterns, struct, fields, f, constraints));
 
 			added.addAll(pattern.getFields());
 		}
 
-		// Add any missing fields we didn't see get accessed
-		for (Field field : Field.allFields(struct)) {
+		// Add any missing fields we didn't see
+		for (Field field : origFields) {
 			if (!added.contains(field)) {
-				pack(patterns, struct, fields, field, minIndex);
+				pack(patterns, struct, fields, field, constraints);
 			}
 		}
 
@@ -918,22 +1119,29 @@ class CostModel {
 	/**
 	 * Pack a new field into a structure.
 	 */
-	private static void pack(AccessPatterns patterns, Structure original, List<Field> fields, Field field, int minIndex) {
+	private static void pack(AccessPatterns patterns, Structure original, List<Field> fields, Field field, StructAbiConstraints constraints) {
 		List<Field> copy = new ArrayList<>(fields);
 		copy.add(field);
 
 		int bestI = -1;
 		long bestScore = -1;
-		for (int i = copy.size() - 1; i >= minIndex; --i) {
-			long newScore = score(patterns, original, build(original, copy));
-			if (bestI < 0 || newScore < bestScore) {
-				bestI = i;
-				bestScore = newScore;
+		for (int i = copy.size() - 1; ; --i) {
+			if (constraints.check(copy, i)) {
+				long newScore = score(patterns, original, build(original, copy));
+				if (bestI < 0 || newScore < bestScore) {
+					bestI = i;
+					bestScore = newScore;
+				}
 			}
 
-			if (i > minIndex) {
-				Collections.swap(copy, i - 1, i);
+			if (i == 0) {
+				break;
 			}
+			Collections.swap(copy, i - 1, i);
+		}
+
+		if (bestI < 0) {
+			throw new RuntimeException("Unsatisfiable constraints for field " + field);
 		}
 
 		fields.add(bestI, field);
