@@ -12,6 +12,7 @@ import bcpi.Linker;
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
+import ghidra.framework.model.DomainObject;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DefaultDataType;
@@ -93,7 +94,10 @@ public class StructOrderAnalysis extends GhidraScript {
 
 	private void getAllPrograms(DomainFolder folder, List<Program> programs) throws Exception {
 		for (DomainFile file : folder.getFiles()) {
-			programs.add((Program) file.getDomainObject(this, true, false, this.monitor));
+			DomainObject object = file.getDomainObject(this, true, false, this.monitor);
+			if (object instanceof Program) {
+				programs.add((Program) object);
+			}
 		}
 
 		for (DomainFolder subFolder : folder.getFolders()) {
