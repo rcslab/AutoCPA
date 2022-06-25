@@ -19,6 +19,8 @@ import com.google.common.base.Equivalence;
 import com.google.common.base.Throwables;
 
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -73,6 +75,32 @@ public class DataTypes {
 			.map(DataTypes::resolve)
 			.filter(t -> t instanceof Pointer)
 			.map(t -> ((Pointer) t).getDataType());
+	}
+
+	/**
+	 * Get the fields of an composite type within a memory range.
+	 */
+	public static List<Field> getFieldsBetween(DataType type, int offset, int endOffset) {
+		List<Field> fields = new ArrayList<>();
+		collectFieldsBetween(type, offset, endOffset, fields);
+		return fields;
+	}
+
+	private static void collectFieldsBetween(DataType type, int offset, int endOffset, List<Field> fields) {
+		type = resolve(type);
+
+		if (type instanceof Structure) {
+			Structure struct = (Structure) dedup(type);
+			for (Field field : Field.allFields(struct)) {
+				int pos = field.getOffset();
+				int start = Math.max(offset, field.getOffset()) - pos;
+				int end = Math.min(endOffset, field.getEndOffset()) - pos;
+				if (start < end) {
+					fields.add(field);
+					collectFieldsBetween(field.getDataType(), start, end, fields);
+				}
+			}
+		}
 	}
 
 	/**

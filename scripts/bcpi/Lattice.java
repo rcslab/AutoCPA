@@ -18,7 +18,7 @@ class Lattice<T> {
 	 * @return The lattice element wrapping the given object.
 	 */
 	static <U> Lattice<U> of(U element) {
-		return new Lattice<>(element, true);
+		return new Lattice<>(Objects.requireNonNull(element), true);
 	}
 
 	/**

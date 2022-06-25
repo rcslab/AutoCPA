@@ -1,6 +1,7 @@
 package bcpi;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
@@ -74,17 +75,26 @@ public class FieldReferences {
 		}
 		boolean isRead = op.getOpcode() == PcodeOp.LOAD;
 
-		Varnode[] inputs = op.getInputs();
 		// input1: Varnode containing pointer offset (to data|of destination)
-		Varnode ptr = inputs[1];
+		Varnode ptr = op.getInput(1);
+
+		// LOAD:  output: Destination varnode.
+		// STORE: input2: Varnode containing data to be stored.
+		Varnode value = isRead ? op.getOutput() : op.getInput(2);
 
 		Facts facts = dataFlow.getFacts(ptr);
-		Field field = facts.getField();
-		if (field == null) {
+		if (!facts.hasType() || !facts.hasOffset()) {
 			return;
 		}
 
+		DataType type = facts.getType();
+		int offset = facts.getOffset().getAsInt();
+		int endOffset = offset + value.getSize();
+
 		Set<FieldReference> fields = updateFields(op.getSeqnum().getTarget());
-		fields.add(new FieldReference(field, facts.isArray(), isRead));
+		DataTypes.getFieldsBetween(type, offset, endOffset)
+			.stream()
+			.map(f -> new FieldReference(f, facts.isArray(), isRead))
+			.forEach(fields::add);
 	}
 }
