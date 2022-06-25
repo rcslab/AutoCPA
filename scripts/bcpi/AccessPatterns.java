@@ -2,13 +2,9 @@ package bcpi;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
-import ghidra.program.model.block.CodeBlockReference;
-import ghidra.program.model.block.CodeBlockReferenceIterator;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
-import ghidra.util.task.TaskMonitor;
 
-import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableSet;
@@ -21,7 +17,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -31,14 +26,12 @@ public class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
 	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
-	private final Linker linker;
 	private final BcpiControlFlow cfgs;
 	private final FieldReferences refs;
 	private long samples = 0;
 	private long attributed = 0;
 
-	public AccessPatterns(Linker linker, BcpiControlFlow cfgs, FieldReferences refs) {
-		this.linker = linker;
+	public AccessPatterns(BcpiControlFlow cfgs, FieldReferences refs) {
 		this.cfgs = cfgs;
 		this.refs = refs;
 	}
@@ -101,57 +94,8 @@ public class AccessPatterns {
 	 * @return All the code blocks that flow through the given address.
 	 */
 	private Set<CodeBlock> getCodeBlocksThrough(Function func, Address address) {
-		try {
-			ControlFlowGraph cfg = this.cfgs.getCfg(func);
-			Set<CodeBlock> blocks = new HashSet<>(cfg.getLikelyReachedBlocks(address));
-			Set<CodeBlock> prevBlocks = blocks;
-			for (int i = 0; i < BcpiConfig.IPA_DEPTH; ++i) {
-				Set<CodeBlock> calledBlocks = getCalledBlocks(prevBlocks);
-				blocks.addAll(calledBlocks);
-				prevBlocks = calledBlocks;
-			}
-			return blocks;
-		} catch (Exception e) {
-			throw Throwables.propagate(e);
-		}
-	}
-
-	/**
-	 * @return All the code blocks that are reached by function calls from the given blocks.
-	 */
-	private Set<CodeBlock> getCalledBlocks(Set<CodeBlock> blocks) throws Exception {
-		Set<CodeBlock> result = new HashSet<>();
-
-		for (CodeBlock block : blocks) {
-			CodeBlockReferenceIterator dests = block.getDestinations(TaskMonitor.DUMMY);
-			while (dests.hasNext()) {
-				CodeBlockReference dest = dests.next();
-				if (!dest.getFlowType().isCall()) {
-					continue;
-				}
-
-				CodeBlock destBlock = dest.getDestinationBlock();
-				Address address = destBlock.getMinAddress();
-				Function function = destBlock.getModel().getProgram().getListing().getFunctionContaining(address);
-				function = Optional
-					.ofNullable(function)
-					.flatMap(linker::resolve)
-					.orElse(null);
-				if (function == null) {
-					continue;
-				}
-
-				long size = function.getBody().getNumAddresses();
-				if (size <= 0 || size >= BcpiConfig.MAX_INLINE_SIZE) {
-					continue;
-				}
-
-				ControlFlowGraph cfg = this.cfgs.getCfg(function);
-				result.addAll(cfg.getLikelyReachedBlocks(address));
-			}
-		}
-
-		return result;
+		ControlFlowGraph cfg = this.cfgs.getCfg(func);
+		return cfg.getLikelyReachedBlocks(address);
 	}
 
 	/**

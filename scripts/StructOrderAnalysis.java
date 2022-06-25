@@ -256,19 +256,19 @@ public class StructOrderAnalysis extends GhidraScript {
 		// for which we have data.  This is much faster than calling
 		// DataTypeReferenceFinder once per field.
 		Linker linker = new Linker(programs);
+		Set<Function> funcs = data.getFunctions();
 
 		BcpiControlFlow cfgs = new BcpiControlFlow(linker);
 		cfgs.addCoverage(data);
 
-		Set<Function> funcs = cfgs.getCalledFunctions(data.getFunctions(), BcpiConfig.IPA_DEPTH);
 		BcpiDecompiler decomp = new BcpiDecompiler();
-		decomp.decompile(funcs);
+		decomp.decompile(cfgs.getCalledFunctions(funcs, BcpiConfig.IPA_DEPTH));
 
-		FieldReferences refs = new FieldReferences(decomp);
+		FieldReferences refs = new FieldReferences(linker, decomp, cfgs);
 		refs.collect(funcs);
 
 		// Use our collected data to infer field access patterns
-		AccessPatterns patterns = new AccessPatterns(linker, cfgs, refs);
+		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
 		patterns.collect(data);
 		double hitRate = 100.0 * patterns.getHitRate();
 		Msg.info(this, String.format("Found patterns for %.2f%% of samples", hitRate));
