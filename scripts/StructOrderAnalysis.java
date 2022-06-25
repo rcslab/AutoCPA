@@ -7,6 +7,7 @@ import bcpi.BcpiDecompiler;
 import bcpi.DataTypes;
 import bcpi.Field;
 import bcpi.FieldReferences;
+import bcpi.Linker;
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
@@ -60,7 +61,9 @@ public class StructOrderAnalysis extends GhidraScript {
 		// Get the decompilation of each function containing an address
 		// for which we have data.  This is much faster than calling
 		// DataTypeReferenceFinder once per field.
-		BcpiControlFlow cfgs = new BcpiControlFlow();
+		Linker linker = new Linker(programs);
+
+		BcpiControlFlow cfgs = new BcpiControlFlow(linker);
 		cfgs.addCoverage(data);
 
 		Set<Function> funcs = cfgs.getCalledFunctions(data.getFunctions(), BcpiConfig.IPA_DEPTH);
@@ -71,7 +74,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		refs.collect(funcs);
 
 		// Use our collected data to infer field access patterns
-		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
+		AccessPatterns patterns = new AccessPatterns(linker, cfgs, refs);
 		patterns.collect(data);
 		double hitRate = 100.0 * patterns.getHitRate();
 		Msg.info(this, String.format("Found patterns for %.2f%% of samples", hitRate));

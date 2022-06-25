@@ -6,6 +6,7 @@ import ghidra.util.task.TaskMonitor;
 
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -15,6 +16,11 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class BcpiControlFlow {
 	private final ConcurrentMap<Function, ControlFlowGraph> cfgs = new ConcurrentHashMap<>();
+	private final Linker linker;
+
+	public BcpiControlFlow(Linker linker) {
+		this.linker = linker;
+	}
 
 	/**
 	 * Add coverage information to the CFGs
@@ -52,9 +58,10 @@ public class BcpiControlFlow {
 			Set<Function> newFuncs = new HashSet<>();
 			for (Function caller : oldFuncs) {
 				for (Function callee : caller.getCalledFunctions(TaskMonitor.DUMMY)) {
-					if (!result.contains(callee)) {
-						newFuncs.add(callee);
-					}
+					Optional.of(callee)
+						.flatMap(linker::resolve)
+						.filter(f -> !result.contains(f))
+						.ifPresent(newFuncs::add);
 				}
 			}
 
