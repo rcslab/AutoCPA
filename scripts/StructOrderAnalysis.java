@@ -4,11 +4,13 @@ import bcpi.BcpiConfig;
 import bcpi.BcpiControlFlow;
 import bcpi.BcpiData;
 import bcpi.BcpiDecompiler;
+import bcpi.CacheCostModel;
 import bcpi.DataTypes;
 import bcpi.Field;
 import bcpi.FieldReferences;
 import bcpi.Linker;
 import bcpi.StructAbiConstraints;
+import bcpi.StructLayoutOptimizer;
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
@@ -16,9 +18,7 @@ import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.DomainObject;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.DefaultDataType;
 import ghidra.program.model.data.Structure;
-import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
@@ -38,11 +38,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.BitSet;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -410,14 +407,16 @@ public class StructOrderAnalysis extends GhidraScript {
 		List<IndexRow> rows = patterns.getStructures()
 			.parallelStream()
 			.map(struct -> {
-                                String name = struct.getName();
+				String name = struct.getName();
 
 				StructAbiConstraints constraints = new StructAbiConstraints(struct);
 				for (ConstraintArg arg : this.constraints.get(name)) {
 					arg.apply(constraints);
 				}
 
-				Structure optimized = CostModel.optimize(patterns, struct, constraints);
+				CacheCostModel costModel = new CacheCostModel(patterns, struct);
+				StructLayoutOptimizer optimizer = new StructLayoutOptimizer(patterns, struct, constraints, costModel);
+				Structure optimized = optimizer.optimize();
 
 				Path path = structResults.resolve(sanitizeFileName(name) + ".html");
 				renderStructs(struct, optimized, patterns, path);
@@ -429,8 +428,8 @@ public class StructOrderAnalysis extends GhidraScript {
 
 				String text = DataTypes.formatCDecl(struct);
 				String href = results.relativize(path).toString();
-				long before = CostModel.score(patterns, struct, struct);
-				long after = CostModel.score(patterns, struct, optimized);
+				long before = costModel.cost(struct);
+				long after = costModel.cost(optimized);
 				long improvement = before - after;
 				return new IndexRow(text, href, nSamples, before, improvement);
 			})
@@ -571,14 +570,15 @@ public class StructOrderAnalysis extends GhidraScript {
 			renderAccessPatterns(before, patterns, out);
 			out.println("</div>");
 
+			CacheCostModel costModel = new CacheCostModel(patterns, before);
 			out.println("<div class='column' style='grid-area: 1 / 2 / 2 / 3;'>");
-			long beforeCost = CostModel.score(patterns, before, before);
+			long beforeCost = costModel.cost(before);
 			out.format("<p><strong>Before:</strong> %,d</p>\n", beforeCost);
 			renderStruct(before, before, patterns, out);
 			out.println("</div>");
 
 			out.println("<div class='column' style='grid-area: 1 / 3 / 2 / 4;'>");
-			long afterCost = CostModel.score(patterns, before, after);
+			long afterCost = costModel.cost(after);
 			long improvement = afterCost - beforeCost;
 			int percentage = percent(improvement, beforeCost);
 			out.format("<p><strong>After:</strong> %,d (%+,d; %+d%%)</p>\n", afterCost, improvement, percentage);
@@ -1070,184 +1070,5 @@ class Table {
 		return this
 			.lines()
 			.collect(Collectors.joining("\n", "", "\n"));
-	}
-}
-
-/**
- * The cost model for our suggested optimizations.
- */
-class CostModel {
-	private static final int CACHE_LINE = 64;
-
-	/**
-	 * Optimize the layout of a struct according to its access pattern.
-	 */
-	static Structure optimize(AccessPatterns patterns, Structure struct, StructAbiConstraints constraints) {
-		List<Field> origFields = Field.allFields(struct);
-		List<Field> fields = new ArrayList<>();
-		Set<Field> added = new HashSet<>();
-
-		// Add fields with fixed positions first
-		for (Field field : origFields) {
-			if (constraints.isFixed(field)) {
-				pack(patterns, struct, fields, field, constraints);
-				added.add(field);
-			}
-		}
-
-		// Then access patterns from most common to least
-		for (AccessPattern pattern : patterns.getPatterns(struct)) {
-			pattern.getFields()
-				.stream()
-				.filter(f -> !added.contains(f))
-				.sorted(Comparator.comparingInt(f -> f.getOrdinal()))
-				.forEach(f -> pack(patterns, struct, fields, f, constraints));
-
-			added.addAll(pattern.getFields());
-		}
-
-		// Add any missing fields we didn't see
-		for (Field field : origFields) {
-			if (!added.contains(field)) {
-				pack(patterns, struct, fields, field, constraints);
-			}
-		}
-
-		return build(struct, fields);
-	}
-
-	/**
-	 * Pack a new field into a structure.
-	 */
-	private static void pack(AccessPatterns patterns, Structure original, List<Field> fields, Field field, StructAbiConstraints constraints) {
-		List<Field> copy = new ArrayList<>(fields);
-		copy.add(field);
-
-		int bestI = -1;
-		long bestScore = -1;
-		for (int i = copy.size() - 1; ; --i) {
-			if (constraints.check(copy, i)) {
-				long newScore = score(patterns, original, build(original, copy));
-				if (bestI < 0 || newScore < bestScore) {
-					bestI = i;
-					bestScore = newScore;
-				}
-			}
-
-			if (i == 0) {
-				break;
-			}
-			Collections.swap(copy, i - 1, i);
-		}
-
-		if (bestI < 0) {
-			throw new RuntimeException("Unsatisfiable constraints for field " + field);
-		}
-
-		fields.add(bestI, field);
-	}
-
-	/**
-	 * Make a copy of a structure with reordered fields.
-	 */
-	private static Structure build(Structure original, List<Field> fields) {
-		StructureDataType optimized = new StructureDataType(original.getCategoryPath(), original.getName(), 0, original.getDataTypeManager());
-
-		for (Field field : fields) {
-			field.copyTo(optimized);
-		}
-
-		// Add trailing padding
-		int align = DataTypes.getAlignment(original);
-		int slop = align - (optimized.getLength() % align);
-		if (slop != align) {
-			optimized.add(DefaultDataType.dataType, slop);
-		}
-
-		return optimized;
-	}
-
-	/**
-	 * Compute the cost of a structure reordering in our cost model.
-	 */
-	static long score(AccessPatterns patterns, Structure original, Structure optimized) {
-		int align;
-		if (BcpiConfig.ASSUME_CACHE_ALIGNED) {
-			align = CACHE_LINE;
-		} else {
-			// Structures are not necessarily allocated at the beginning of a cache line
-			align = DataTypes.getAlignment(original);
-			// Assume allocations are at least pointer-aligned
-			align = Math.max(align, original.getDataOrganization().getDefaultPointerAlignment());
-			align = Math.min(align, CACHE_LINE);
-		}
-
-		// Compute a fast mapping between the original and optimized fields, since the
-		// access patterns refer to the original fields
-		List<Field> originalFields = Field.allFields(original);
-		List<Field> optimizedFields = Field.allFields(optimized);
-		Map<String, Field> fieldMap = optimizedFields
-			.stream()
-			.collect(Collectors.toMap(f -> f.getFieldName(), f -> f));
-
-		Field[] fieldPerm = new Field[original.getNumComponents()];
-		for (Field origField : originalFields) {
-			Field optField = fieldMap.get(origField.getFieldName());
-			fieldPerm[origField.getOrdinal()] = optField;
-		}
-
-		// As a heuristic, assume offset zero is twice as likely as the next possible
-		// offset, which is twice as likely as the next one, etc.
-		int nOffsets = CACHE_LINE / align;
-		long totalWeight = (1L << nOffsets) - 1;
-
-		// Compute the expected cost over the possible cache line offsets
-		long total = 0;
-		int weightShift = nOffsets;
-		int nCacheLines = 1 + (optimized.getLength() + CACHE_LINE - 1) / CACHE_LINE;
-		BitSet touchedLines = new BitSet(nCacheLines);
-		for (int offset = 0; offset < CACHE_LINE; offset += align) {
-			// For each offset, the cost is the cumulative number of cache lines touched
-			// up to the current pattern, weighted by the pattern's observation count.
-			// You can think of this like the area under the (pattern, cache lines) curve.
-			touchedLines.clear();
-
-			long cost = 0;
-			for (AccessPattern pattern : patterns.getPatterns(original)) {
-				long count = patterns.getCount(original, pattern);
-
-				for (Field origField : pattern.getFields()) {
-					Field optField = fieldPerm[origField.getOrdinal()];
-					if (optField == null) {
-						continue;
-					}
-
-					int start = (offset + optField.getOffset()) / CACHE_LINE;
-					int end = (offset + optField.getEndOffset() - 1) / CACHE_LINE;
-					touchedLines.set(start, end + 1);
-				}
-
-				cost += count * touchedLines.cardinality();
-			}
-
-			--weightShift;
-			total += cost << weightShift;
-		}
-
-		// Normalize the score
-		long cost = (total + totalWeight - 1) / totalWeight;
-
-		// Penalize internal padding
-		int padding = 0;
-		for (DataTypeComponent field : optimized.getComponents()) {
-			if (Field.isPadding(field)) {
-				padding += field.getLength();
-			} else {
-				cost += padding;
-				padding = 0;
-			}
-		}
-
-		return cost;
 	}
 }
