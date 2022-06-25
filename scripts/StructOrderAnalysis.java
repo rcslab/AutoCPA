@@ -3,8 +3,7 @@ import bcpi.AccessPatterns;
 import bcpi.BcpiConfig;
 import bcpi.BcpiControlFlow;
 import bcpi.BcpiData;
-import bcpi.BcpiDataRow;
-import bcpi.ControlFlowGraph;
+import bcpi.BcpiDecompiler;
 import bcpi.DataTypes;
 import bcpi.Field;
 import bcpi.FieldReferences;
@@ -27,9 +26,6 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
-
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Multimaps;
 
 import java.io.PrintWriter;
 import java.nio.file.Files;
@@ -68,11 +64,11 @@ public class StructOrderAnalysis extends GhidraScript {
 		cfgs.addCoverage(data);
 
 		Set<Function> funcs = cfgs.getCalledFunctions(data.getFunctions(), BcpiConfig.IPA_DEPTH);
-		Multimap<Program, Function> index = Multimaps.index(funcs, Function::getProgram);
-		FieldReferences refs = new FieldReferences();
-		for (Program program : programs) {
-			refs.collect(program, new HashSet<>(index.get(program)), this.monitor);
-		}
+		BcpiDecompiler decomp = new BcpiDecompiler();
+		decomp.decompile(funcs);
+
+		FieldReferences refs = new FieldReferences(decomp);
+		refs.collect(funcs);
 
 		// Use our collected data to infer field access patterns
 		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
