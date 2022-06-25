@@ -1,18 +1,12 @@
 package bcpi;
 
-import bcpi.BcpiConfig;
-import bcpi.BcpiDataRow;
-
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
-import ghidra.util.task.TaskMonitor;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
-import com.google.common.collect.SetMultimap;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -23,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Holds the data collected by BCPI.
@@ -73,22 +68,11 @@ public class BcpiData {
 	/**
 	 * @return All the functions that contain an address for which we have data.
 	 */
-	public SetMultimap<Program, Function> getRelevantFunctions(Collection<Program> programs, TaskMonitor monitor) {
-		SetMultimap<Program, Function> funcs = HashMultimap.create();
-		for (BcpiDataRow row : this.rows.values()) {
-			if (programs.contains(row.program)) {
-				addFunction(funcs, row.function, 0, monitor);
-			}
-		}
-		return funcs;
-	}
-
-	private void addFunction(SetMultimap<Program, Function> funcs, Function func, int depth, TaskMonitor monitor) {
-		if (funcs.put(func.getProgram(), func) && depth < BcpiConfig.IPA_DEPTH) {
-			for (Function callee : func.getCalledFunctions(monitor)) {
-				addFunction(funcs, callee, depth + 1, monitor);
-			}
-		}
+	public Set<Function> getFunctions() {
+		return this.rows.values()
+			.stream()
+			.map(row -> row.function)
+			.collect(Collectors.toSet());
 	}
 
 	/**
@@ -108,6 +92,13 @@ public class BcpiData {
 		} else {
 			return row.getCount(counter);
 		}
+	}
+
+	/**
+	 * @return All the data.
+	 */
+	public Collection<BcpiDataRow> getRows() {
+		return this.rows.values();
 	}
 
 	/**

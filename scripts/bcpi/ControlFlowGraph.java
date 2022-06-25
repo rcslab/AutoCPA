@@ -15,6 +15,7 @@ import ghidra.program.model.block.CodeBlockReferenceIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
 
+import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 
@@ -96,7 +97,6 @@ class CodeBlockEdge extends DefaultGEdge<CodeBlockVertex> {
  */
 public class ControlFlowGraph {
 	private final BasicBlockModel bbModel;
-	private final TaskMonitor monitor;
 	private final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> cfg;
 	private final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> reverseCfg;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> domTree;
@@ -106,21 +106,31 @@ public class ControlFlowGraph {
 	// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
 	private final Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
 
-	public ControlFlowGraph(Function function, TaskMonitor monitor) throws Exception {
+	public ControlFlowGraph(Function function) {
 		this.bbModel = new BasicBlockModel(function.getProgram());
-		this.monitor = monitor;
 		this.cfg = new JungDirectedGraph<>();
 		this.reverseCfg = new JungDirectedGraph<>();
+		this.coverage = HashMultiset.create();
 
+		try {
+			buildCfgs(function);
+			this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, TaskMonitor.DUMMY);
+			this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, TaskMonitor.DUMMY);
+		} catch (Exception e) {
+			throw Throwables.propagate(e);
+		}
+	}
+
+	private void buildCfgs(Function function) throws Exception {
 		AddressSetView body = function.getBody();
-		CodeBlockIterator blocks = bbModel.getCodeBlocksContaining(body, monitor);
+		CodeBlockIterator blocks = bbModel.getCodeBlocksContaining(body, TaskMonitor.DUMMY);
 
 		// Build the forward and backward CFGs for this function
 		while (blocks.hasNext()) {
 			CodeBlock block = blocks.next();
 			CodeBlockVertex vertex = new CodeBlockVertex(block);
 
-			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
+			CodeBlockReferenceIterator dests = block.getDestinations(TaskMonitor.DUMMY);
 			while (dests.hasNext()) {
 				CodeBlockReference dest = dests.next();
 				CodeBlock destBlock = dest.getDestinationBlock();
@@ -137,7 +147,7 @@ public class ControlFlowGraph {
 			addEdge(source, vertex);
 		}
 		// The function entry point is always a source vertex
-		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), monitor)) {
+		for (CodeBlock block : bbModel.getCodeBlocksContaining(function.getEntryPoint(), TaskMonitor.DUMMY)) {
 			addEdge(source, new CodeBlockVertex(block));
 		}
 
@@ -147,19 +157,18 @@ public class ControlFlowGraph {
 		for (CodeBlockVertex vertex : sinks) {
 			addEdge(vertex, sink);
 		}
-
-		this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, monitor);
-		this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, monitor);
-
-		this.coverage = HashMultiset.create();
 	}
 
 	/**
 	 * Add coverage info for a code address.
 	 */
-	public void addCoverage(Address address, int count) throws Exception {
-		for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, this.monitor)) {
-			this.coverage.add(new CodeBlockVertex(block), count);
+	public void addCoverage(Address address, int count) {
+		try {
+			for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, TaskMonitor.DUMMY)) {
+				this.coverage.add(new CodeBlockVertex(block), count);
+			}
+		} catch (Exception e) {
+			throw Throwables.propagate(e);
 		}
 	}
 
@@ -224,7 +233,7 @@ public class ControlFlowGraph {
 	/**
 	 * Get the basic blocks that are definitely reached after the given blocks.
 	 */
-	private Set<CodeBlockVertex> getDefiniteSuccessors(Collection<CodeBlockVertex> blocks) throws Exception {
+	private Set<CodeBlockVertex> getDefiniteSuccessors(Collection<CodeBlockVertex> blocks) {
 		// We want all the nodes B such that all paths from A to END contain B, i.e.
 		//
 		//     {B | B postDom A}
@@ -239,17 +248,21 @@ public class ControlFlowGraph {
 	/**
 	 * Get the basic blocks that are definitely reached before the given block.
 	 */
-	private Set<CodeBlockVertex> getDefinitePredecessors(List<CodeBlockVertex> blocks) throws Exception {
+	private Set<CodeBlockVertex> getDefinitePredecessors(List<CodeBlockVertex> blocks) {
 		return GraphAlgorithms.getAncestors(this.domTree, blocks);
 	}
 
 	/**
 	 * Get the basic blocks that are likely executed when the given address reached.
 	 */
-	public Set<CodeBlock> getLikelyReachedBlocks(Address address) throws Exception {
+	public Set<CodeBlock> getLikelyReachedBlocks(Address address) {
 		List<CodeBlockVertex> containing = new ArrayList<>();
-		for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, this.monitor)) {
-			containing.add(new CodeBlockVertex(block));
+		try {
+			for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, TaskMonitor.DUMMY)) {
+				containing.add(new CodeBlockVertex(block));
+			}
+		} catch (Exception e) {
+			throw Throwables.propagate(e);
 		}
 
 		// Get definitely reached blocks
