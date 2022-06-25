@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -30,12 +31,14 @@ public class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
 	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
+	private final Linker linker;
 	private final BcpiControlFlow cfgs;
 	private final FieldReferences refs;
 	private long samples = 0;
 	private long attributed = 0;
 
-	public AccessPatterns(BcpiControlFlow cfgs, FieldReferences refs) {
+	public AccessPatterns(Linker linker, BcpiControlFlow cfgs, FieldReferences refs) {
+		this.linker = linker;
 		this.cfgs = cfgs;
 		this.refs = refs;
 	}
@@ -130,9 +133,10 @@ public class AccessPatterns {
 				CodeBlock destBlock = dest.getDestinationBlock();
 				Address address = destBlock.getMinAddress();
 				Function function = destBlock.getModel().getProgram().getListing().getFunctionContaining(address);
-				if (function != null && function.isThunk()) {
-					function = function.getThunkedFunction(true);
-				}
+				function = Optional
+					.ofNullable(function)
+					.flatMap(linker::resolve)
+					.orElse(null);
 				if (function == null) {
 					continue;
 				}
