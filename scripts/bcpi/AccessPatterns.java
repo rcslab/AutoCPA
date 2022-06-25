@@ -8,6 +8,7 @@ import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
 
+import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableSet;
@@ -29,42 +30,29 @@ public class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
 	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
-	private final Map<Function, ControlFlowGraph> cfgs = new HashMap<>();
-	private final BcpiData data;
+	private final BcpiControlFlow cfgs;
 	private final FieldReferences refs;
 	private long samples = 0;
 	private long attributed = 0;
 
-	private AccessPatterns(BcpiData data, FieldReferences refs) {
-		this.data = data;
+	public AccessPatterns(BcpiControlFlow cfgs, FieldReferences refs) {
+		this.cfgs = cfgs;
 		this.refs = refs;
 	}
 
 	/**
 	 * Infer access patterns from the collected data.
 	 */
-	public static AccessPatterns collect(BcpiData data, FieldReferences refs, TaskMonitor monitor) throws Exception {
-		AccessPatterns patterns = new AccessPatterns(data, refs);
-		patterns.collect(monitor);
-		return patterns;
-	}
-
-	private void collect(TaskMonitor monitor) throws Exception {
-		// Add coverage information to the CFGs
-		for (Address address : this.data.getAddresses()) {
-			BcpiDataRow row = this.data.getRow(address);
-			int count = row.getCount(BcpiConfig.INSTRUCTION_COUNTER);
-			ControlFlowGraph cfg = getCfg(row.function, monitor);
-			cfg.addCoverage(address, count);
-		}
-
+	public void collect(BcpiData data) {
 		// Find access patterns associated with cache misses
-		for (Address baseAddress : this.data.getAddresses()) {
+		for (Address baseAddress : data.getAddresses()) {
+			Function func = data.getRow(baseAddress).function;
+
 			Map<Structure, Set<Field>> reads = new HashMap<>();
 			Map<Structure, Set<Field>> writes = new HashMap<>();
-			int count = this.data.getCount(baseAddress, BcpiConfig.CACHE_MISS_COUNTER);
+			int count = data.getCount(baseAddress, BcpiConfig.CACHE_MISS_COUNTER);
 
-			Set<CodeBlock> blocks = getCodeBlocksThrough(baseAddress, monitor);
+			Set<CodeBlock> blocks = getCodeBlocksThrough(func, baseAddress);
 			for (CodeBlock block : blocks) {
 				for (Address address : block.getAddresses(true)) {
 					if (!BcpiConfig.ANALYZE_BACKWARD_FLOW && block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
@@ -94,7 +82,7 @@ public class AccessPatterns {
 				this.patterns
 					.computeIfAbsent(struct, k -> HashMultiset.create())
 					.add(pattern, count);
-				this.functions.put(pattern, this.data.getRow(baseAddress).function);
+				this.functions.put(pattern, func);
 			}
 		}
 	}
@@ -107,43 +95,32 @@ public class AccessPatterns {
 	}
 
 	/**
-	 * @return The cached CFG for a function.
-	 */
-	private ControlFlowGraph getCfg(Function function, TaskMonitor monitor) throws Exception {
-		ControlFlowGraph cfg = this.cfgs.get(function);
-		if (cfg == null) {
-			cfg = new ControlFlowGraph(function, monitor);
-			this.cfgs.put(function, cfg);
-		}
-		return cfg;
-	}
-
-	/**
 	 * @return All the code blocks that flow through the given address.
 	 */
-	private Set<CodeBlock> getCodeBlocksThrough(Address address, TaskMonitor monitor) throws Exception {
-		BcpiDataRow row = this.data.getRow(address);
-
-		ControlFlowGraph cfg = getCfg(row.function, monitor);
-		Set<CodeBlock> blocks = new HashSet<>(cfg.getLikelyReachedBlocks(address));
-		Set<CodeBlock> prevBlocks = blocks;
-		for (int i = 0; i < BcpiConfig.IPA_DEPTH; ++i) {
-			Set<CodeBlock> calledBlocks = getCalledBlocks(prevBlocks, monitor);
-			blocks.addAll(calledBlocks);
-			prevBlocks = calledBlocks;
+	private Set<CodeBlock> getCodeBlocksThrough(Function func, Address address) {
+		try {
+			ControlFlowGraph cfg = this.cfgs.getCfg(func);
+			Set<CodeBlock> blocks = new HashSet<>(cfg.getLikelyReachedBlocks(address));
+			Set<CodeBlock> prevBlocks = blocks;
+			for (int i = 0; i < BcpiConfig.IPA_DEPTH; ++i) {
+				Set<CodeBlock> calledBlocks = getCalledBlocks(prevBlocks);
+				blocks.addAll(calledBlocks);
+				prevBlocks = calledBlocks;
+			}
+			return blocks;
+		} catch (Exception e) {
+			throw Throwables.propagate(e);
 		}
-
-		return blocks;
 	}
 
 	/**
 	 * @return All the code blocks that are reached by function calls from the given blocks.
 	 */
-	private Set<CodeBlock> getCalledBlocks(Set<CodeBlock> blocks, TaskMonitor monitor) throws Exception {
+	private Set<CodeBlock> getCalledBlocks(Set<CodeBlock> blocks) throws Exception {
 		Set<CodeBlock> result = new HashSet<>();
 
 		for (CodeBlock block : blocks) {
-			CodeBlockReferenceIterator dests = block.getDestinations(monitor);
+			CodeBlockReferenceIterator dests = block.getDestinations(TaskMonitor.DUMMY);
 			while (dests.hasNext()) {
 				CodeBlockReference dest = dests.next();
 				if (!dest.getFlowType().isCall()) {
@@ -165,7 +142,7 @@ public class AccessPatterns {
 					continue;
 				}
 
-				ControlFlowGraph cfg = getCfg(function, monitor);
+				ControlFlowGraph cfg = this.cfgs.getCfg(function);
 				result.addAll(cfg.getLikelyReachedBlocks(address));
 			}
 		}

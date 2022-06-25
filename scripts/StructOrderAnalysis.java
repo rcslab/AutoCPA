@@ -1,6 +1,7 @@
 import bcpi.AccessPattern;
 import bcpi.AccessPatterns;
 import bcpi.BcpiConfig;
+import bcpi.BcpiControlFlow;
 import bcpi.BcpiData;
 import bcpi.BcpiDataRow;
 import bcpi.ControlFlowGraph;
@@ -27,8 +28,8 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.SetMultimap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
 
 import java.io.PrintWriter;
 import java.nio.file.Files;
@@ -63,15 +64,21 @@ public class StructOrderAnalysis extends GhidraScript {
 		// Get the decompilation of each function containing an address
 		// for which we have data.  This is much faster than calling
 		// DataTypeReferenceFinder once per field.
-		SetMultimap<Program, Function> funcs = data.getRelevantFunctions(programs, this.monitor);
+		BcpiControlFlow cfgs = new BcpiControlFlow();
+		cfgs.addCoverage(data);
+
+		Set<Function> funcs = cfgs.getCalledFunctions(data.getFunctions(), BcpiConfig.IPA_DEPTH);
+		Multimap<Program, Function> index = Multimaps.index(funcs, Function::getProgram);
 		FieldReferences refs = new FieldReferences();
 		for (Program program : programs) {
-			refs.collect(program, funcs.get(program), this.monitor);
+			refs.collect(program, new HashSet<>(index.get(program)), this.monitor);
 		}
 
 		// Use our collected data to infer field access patterns
-		AccessPatterns patterns = AccessPatterns.collect(data, refs, this.monitor);
-		Msg.info(this, "Found patterns for " + (100.0 * patterns.getHitRate()) + "% of samples");
+		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
+		patterns.collect(data);
+		double hitRate = 100.0 * patterns.getHitRate();
+		Msg.info(this, String.format("Found patterns for %.2f%% of samples", hitRate));
 
 		String name = getState().getProject().getName();
 		Path results = Paths.get("./results").resolve(name);
