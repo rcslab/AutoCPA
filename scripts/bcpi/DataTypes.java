@@ -5,10 +5,12 @@ import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DataTypePath;
+import ghidra.program.model.data.DefaultDataType;
 import ghidra.program.model.data.Enum;
 import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.data.TypeDef;
 import ghidra.program.model.data.Union;
 import ghidra.util.Msg;
@@ -150,6 +152,23 @@ public class DataTypes {
 			}
 
 			struct.insertAtOffset(offset, type, field.getLength(), field.getFieldName(), field.getComment());
+		}
+	}
+
+	/**
+	 * Create an empty structure that's otherwise a copy of the given structure.
+	 */
+	public static Structure emptyStructLike(Structure struct) {
+		return new StructureDataType(struct.getCategoryPath(), struct.getName(), 0, struct.getDataTypeManager());
+	}
+
+	/**
+	 * Pad the tail of a structure to the given alignment.
+	 */
+	public static void padTail(Structure struct, int align) {
+		int slop = align - (struct.getLength() % align);
+		if (slop != align) {
+			struct.add(DefaultDataType.dataType, slop);
 		}
 	}
 
