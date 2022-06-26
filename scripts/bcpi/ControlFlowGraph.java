@@ -102,6 +102,7 @@ public class ControlFlowGraph {
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> domTree;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> postDomTree;
 	private final Multiset<CodeBlockVertex> coverage;
+	private final Map<CodeBlockVertex, CodeBlockVertex> fallthroughEdges = new HashMap<>();
 
 	// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
 	private final Map<CodeBlockVertex, CodeBlockVertex> interner = new HashMap<>();
@@ -136,7 +137,11 @@ public class ControlFlowGraph {
 				CodeBlock destBlock = dest.getDestinationBlock();
 				// Ignore non-local control flow
 				if (body.contains(destBlock)) {
-					addEdge(vertex, new CodeBlockVertex(destBlock));
+					CodeBlockVertex child = new CodeBlockVertex(destBlock);
+					addEdge(vertex, child);
+					if (dest.getFlowType().isFallthrough()) {
+						this.fallthroughEdges.put(vertex, child);
+					}
 				}
 			}
 		}
@@ -170,14 +175,6 @@ public class ControlFlowGraph {
 		} catch (Exception e) {
 			throw Throwables.propagate(e);
 		}
-	}
-
-	/**
-	 * Get the amount of coverage for a block.
-	 */
-	int getCoverage(CodeBlockVertex vertex) {
-		// Simple smoothing
-		return 1 + this.coverage.count(vertex);
 	}
 
 	/**
@@ -293,6 +290,23 @@ public class ControlFlowGraph {
 	}
 
 	/**
+	 * Get the amount of coverage for a block.
+	 */
+	private int getCoverage(CodeBlockVertex parent, CodeBlockVertex child) {
+		int result = this.coverage.count(child);
+
+		// Smooth out zero denominators
+		++result;
+
+		// Predict branches not taken in the absense of other information
+		if (child.equals(this.fallthroughEdges.get(parent))) {
+			++result;
+		}
+
+		return result;
+	}
+
+	/**
 	 * Do beam search to find likely reached blocks based on coverage information.
 	 */
 	private void beamSearch(
@@ -318,7 +332,7 @@ public class ControlFlowGraph {
 
 				int total = 0;
 				for (CodeBlockVertex vertex : successors) {
-					total += getCoverage(vertex);
+					total += getCoverage(parent.vertex, vertex);
 				}
 
 				// Don't add looping paths
@@ -327,7 +341,7 @@ public class ControlFlowGraph {
 				}
 
 				for (CodeBlockVertex vertex : successors) {
-					double weight = (double)getCoverage(vertex) / total;
+					double weight = (double)getCoverage(parent.vertex, vertex) / total;
 					beam.offer(new BeamPath(parent, vertex, weight));
 					if (beam.size() > BcpiConfig.BEAM_WIDTH) {
 						beam.poll();
