@@ -361,13 +361,13 @@ public class StructOrderAnalysis extends GhidraScript {
 	private static class IndexRow {
 		final String name;
 		final String href;
-		final int nSamples;
+		final long nSamples;
 		final long cost;
 		int costPercent = 0;
 		final long improvement;
 		int cumulative = 0;
 
-		IndexRow(String name, String href, int nSamples, long cost, long improvement) {
+		IndexRow(String name, String href, long nSamples, long cost, long improvement) {
 			this.name = name;
 			this.href = href;
 			this.nSamples = nSamples;
@@ -421,13 +421,9 @@ public class StructOrderAnalysis extends GhidraScript {
 				Path path = structResults.resolve(sanitizeFileName(name) + ".html");
 				renderStructs(struct, optimized, patterns, path);
 
-				int nSamples = patterns.getPatterns(struct)
-					.stream()
-					.mapToInt(pattern -> patterns.getCount(struct, pattern))
-					.sum();
-
 				String text = DataTypes.formatCDecl(struct);
 				String href = results.relativize(path).toString();
+				long nSamples = patterns.getCount(struct);
 				long before = costModel.cost(struct);
 				long after = costModel.cost(optimized);
 				long improvement = before - after;
@@ -680,11 +676,11 @@ public class StructOrderAnalysis extends GhidraScript {
 			table.get(row, commentCol).append("//");
 		}
 
-		Set<AccessPattern> structPatterns = patterns.getPatterns(original);
+		List<AccessPattern> structPatterns = patterns.getRankedPatterns(original);
 		SetMultimap<String, Integer> fieldPatterns = HashMultimap.create();
 		SetMultimap<Integer, Integer> colPatterns = HashMultimap.create();
 		int count = 0;
-		int total = patterns.getCount(original);
+		long total = patterns.getCount(original);
 		final int MAX_COLS = 7;
 		for (AccessPattern pattern : structPatterns) {
 			int patternId = count++;
@@ -696,7 +692,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			colPatterns.put(col, patternId);
 
 			if (col < MAX_COLS) {
-				int percentage = percent(patterns.getCount(original, pattern), total);
+				int percentage = percent(patterns.getCount(pattern), total);
 				table.get(0, col)
 					.append(percentage)
 					.append("%");
@@ -895,8 +891,8 @@ public class StructOrderAnalysis extends GhidraScript {
 	private void renderAccessPatterns(Structure struct, AccessPatterns patterns, PrintWriter out) {
 		out.println("<ul>");
 
-		int total = patterns.getCount(struct);
-		Set<AccessPattern> structPatterns = patterns.getPatterns(struct);
+		long total = patterns.getCount(struct);
+		List<AccessPattern> structPatterns = patterns.getRankedPatterns(struct);
 		int id = 0;
 		for (AccessPattern pattern : structPatterns) {
 			out.format("<li class='pattern pattern-%d' style='margin-top: 8px;'", id);
@@ -904,7 +900,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			out.format(" onmouseleave=\"highlight('.pattern-%d', false, false);\"", id);
 			out.format(" onclick=\"highlightSticky(this, '.pattern-%d');\">", id);
 
-			int count = patterns.getCount(struct, pattern);
+			long count = patterns.getCount(pattern);
 			int percentage = percent(count, total);
 			out.format("%d%% (%,d times)<br><code>%s</code>\n", percentage, count, pattern);
 

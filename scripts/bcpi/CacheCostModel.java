@@ -75,8 +75,8 @@ public class CacheCostModel implements CostModel<Structure> {
 			touchedLines.clear();
 
 			long cost = 0;
-			for (AccessPattern pattern : this.patterns.getPatterns(this.original)) {
-				long count = this.patterns.getCount(this.original, pattern);
+			for (AccessPattern pattern : this.patterns.getRankedPatterns(this.original)) {
+				long count = this.patterns.getCount(pattern);
 
 				for (Field origField : pattern.getFields()) {
 					Field optField = fieldPerm[origField.getOrdinal()];
