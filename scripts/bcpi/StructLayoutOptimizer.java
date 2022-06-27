@@ -44,7 +44,7 @@ public class StructLayoutOptimizer {
 		}
 
 		// Then access patterns from most common to least
-		for (AccessPattern pattern : patterns.getPatterns(this.original)) {
+		for (AccessPattern pattern : patterns.getRankedPatterns(this.original)) {
 			pattern.getFields()
 				.stream()
 				.filter(f -> !added.contains(f))

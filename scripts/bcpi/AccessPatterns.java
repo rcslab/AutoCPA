@@ -4,32 +4,35 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
+import ghidra.util.Msg;
 
 import com.google.common.collect.HashMultimap;
-import com.google.common.collect.HashMultiset;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Multiset;
-import com.google.common.collect.Multisets;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 
+import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.Collectors;
 
 /**
  * Struct field access patterns.
  */
 public class AccessPatterns {
 	// Stores the access patterns for each struct
-	private final Map<Structure, Multiset<AccessPattern>> patterns = new HashMap<>();
-	private final SetMultimap<AccessPattern, Function> functions = HashMultimap.create();
+	private final ConcurrentMap<Structure, Set<AccessPattern>> patterns = new ConcurrentHashMap<>();
+	private final ConcurrentMap<AccessPattern, LongAdder> counts = new ConcurrentHashMap<>();
+	private final ConcurrentMap<AccessPattern, Set<Function>> functions = new ConcurrentHashMap<>();
+	private final LongAdder samples = new LongAdder();
+	private final LongAdder attributed = new LongAdder();
 	private final BcpiControlFlow cfgs;
 	private final FieldReferences refs;
-	private long samples = 0;
-	private long attributed = 0;
 
 	public AccessPatterns(BcpiControlFlow cfgs, FieldReferences refs) {
 		this.cfgs = cfgs;
@@ -41,45 +44,52 @@ public class AccessPatterns {
 	 */
 	public void collect(BcpiData data) {
 		// Find access patterns associated with cache misses
-		for (Address baseAddress : data.getAddresses()) {
-			Function func = data.getRow(baseAddress).function;
+		Collection<BcpiDataRow> rows = data.getRows();
+		Msg.info(this, String.format("Collecting access patterns from %,d instructions", rows.size()));
+		rows.parallelStream().forEach(this::collect);
+	}
 
-			Map<Structure, Set<Field>> reads = new HashMap<>();
-			Map<Structure, Set<Field>> writes = new HashMap<>();
-			int count = data.getCount(baseAddress, BcpiConfig.CACHE_MISS_COUNTER);
+	private void collect(BcpiDataRow row) {
+		long count = row.getCount(BcpiConfig.CACHE_MISS_COUNTER);
+		if (count == 0) {
+			return;
+		}
 
-			Set<CodeBlock> blocks = getCodeBlocksThrough(func, baseAddress);
-			for (CodeBlock block : blocks) {
-				for (Address address : block.getAddresses(true)) {
-					if (!BcpiConfig.ANALYZE_BACKWARD_FLOW && block.contains(baseAddress) && address.compareTo(baseAddress) < 0) {
-						// Don't count accesses before the miss
-						continue;
-					}
+		SetMultimap<Structure, Field> reads = HashMultimap.create();
+		SetMultimap<Structure, Field> writes = HashMultimap.create();
 
-					for (FieldReference ref : this.refs.getFields(address)) {
-						Field field = ref.getField();
-						Structure struct = field.getParent();
-						(ref.isRead() ? reads : writes)
-							.computeIfAbsent(struct, k -> new HashSet<>())
-							.add(field);
-					}
+		Set<CodeBlock> blocks = getCodeBlocksThrough(row.function, row.address);
+		for (CodeBlock block : blocks) {
+			for (Address address : block.getAddresses(true)) {
+				if (!BcpiConfig.ANALYZE_BACKWARD_FLOW && block.contains(row.address) && address.compareTo(row.address) < 0) {
+					// Don't count accesses before the miss
+					continue;
+				}
+
+				for (FieldReference ref : this.refs.getFields(address)) {
+					Field field = ref.getField();
+					Structure struct = field.getParent();
+					(ref.isRead() ? reads : writes).put(struct, field);
 				}
 			}
+		}
 
-			this.samples += count;
-			if (!reads.isEmpty() || !writes.isEmpty()) {
-				this.attributed += count;
-			}
+		this.samples.add(count);
+		if (!reads.isEmpty() || !writes.isEmpty()) {
+			this.attributed.add(count);
+		}
 
-			for (Structure struct : Sets.union(reads.keySet(), writes.keySet())) {
-				Set<Field> read = reads.getOrDefault(struct, Collections.emptySet());
-				Set<Field> written = writes.getOrDefault(struct, Collections.emptySet());
-				AccessPattern pattern = new AccessPattern(read, written);
-				this.patterns
-					.computeIfAbsent(struct, k -> HashMultiset.create())
-					.add(pattern, count);
-				this.functions.put(pattern, func);
-			}
+		for (Structure struct : Sets.union(reads.keySet(), writes.keySet())) {
+			AccessPattern pattern = new AccessPattern(reads.get(struct), writes.get(struct));
+			this.patterns
+				.computeIfAbsent(struct, k -> ConcurrentHashMap.newKeySet())
+				.add(pattern);
+			this.counts
+				.computeIfAbsent(pattern, k -> new LongAdder())
+				.add(count);
+			this.functions
+				.computeIfAbsent(pattern, k -> ConcurrentHashMap.newKeySet())
+				.add(row.function);
 		}
 	}
 
@@ -87,7 +97,7 @@ public class AccessPatterns {
 	 * @return The fraction of samples that we found an access pattern for.
 	 */
 	public double getHitRate() {
-		return (double) this.attributed / this.samples;
+		return (double) this.attributed.sum() / this.samples.sum();
 	}
 
 	/**
@@ -108,47 +118,42 @@ public class AccessPatterns {
 	/**
 	 * @return All the access patterns we saw for a structure, from most to least often.
 	 */
-	public Set<AccessPattern> getPatterns(Structure struct) {
-		return ImmutableSet.copyOf(
-			Multisets.copyHighestCountFirst(this.patterns.get(struct))
-				.elementSet()
-		);
+	public List<AccessPattern> getRankedPatterns(Structure struct) {
+		return this.patterns
+			.getOrDefault(struct, Collections.emptySet())
+			.stream()
+			.sorted(Comparator
+				.<AccessPattern>comparingLong(this::getCount)
+				.reversed())
+			.collect(Collectors.toList());
 	}
 
 	/**
 	 * @return The total number of accesses to a struct.
 	 */
-	public int getCount(Structure struct) {
-		return this.patterns.get(struct).size();
+	public long getCount(Structure struct) {
+		return this.patterns
+			.getOrDefault(struct, Collections.emptySet())
+			.stream()
+			.mapToLong(this::getCount)
+			.sum();
 	}
 
 	/**
 	 * @return The number of occurrences of an access pattern.
 	 */
-	public int getCount(Structure struct, AccessPattern pattern) {
-		return this.patterns.get(struct).count(pattern);
-	}
-
-	/**
-	 * @return The number of accesses we have to this field.
-	 */
-	private int getCount(Field field) {
-		int count = 0;
-		Multiset<AccessPattern> patterns = this.patterns.get(field.getParent());
-		if (patterns != null) {
-			for (Multiset.Entry<AccessPattern> entry : patterns.entrySet()) {
-				if (entry.getElement().getFields().contains(field)) {
-					count += entry.getCount();
-				}
-			}
-		}
-		return count;
+	public long getCount(AccessPattern pattern) {
+		return this.counts
+			.getOrDefault(pattern, new LongAdder())
+			.sum();
 	}
 
 	/**
 	 * @return The functions which had the given access pattern.
 	 */
 	public Set<Function> getFunctions(AccessPattern pattern) {
-		return Collections.unmodifiableSet(this.functions.get(pattern));
+		return Optional.ofNullable(this.functions.get(pattern))
+			.map(Collections::unmodifiableSet)
+			.orElseGet(Collections::emptySet);
 	}
 }
