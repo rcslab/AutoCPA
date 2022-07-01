@@ -90,6 +90,11 @@ public class CacheCostModel implements CostModel<Structure> {
 				}
 
 				cost += count * touchedLines.cardinality();
+
+				if (touchedLines.get(0)) {
+					// Break ties by slightly preferring the first cache line
+					cost -= 1;
+				}
 			}
 
 			--weightShift;
