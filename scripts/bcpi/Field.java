@@ -22,9 +22,9 @@ public class Field {
 	private final int endOffset;
 	private final List<DataTypeComponent> components;
 
-	private Field(Structure parent, DataType type, int offset, int endOffset, List<DataTypeComponent> components) {
+	private Field(Structure parent, int offset, int endOffset, List<DataTypeComponent> components) {
 		this.parent = parent;
-		this.type = type;
+		this.type = components.get(0).getDataType();
 		this.offset = offset;
 		this.endOffset = endOffset;
 		this.components = ImmutableList.copyOf(components);
@@ -37,34 +37,34 @@ public class Field {
 		List<Field> fields = new ArrayList<>();
 
 		List<DataTypeComponent> components = new ArrayList<>();
-		DataType type = null;
-		int offset = 0, endOffset = 0;
+		int bitOffset = 0;
 
 		for (DataTypeComponent component : struct.getComponents()) {
 			if (isPadding(component)) {
 				continue;
 			}
 
-			int curOffset = component.getOffset();
-			if (curOffset >= endOffset) {
+			int curOffset = 8 * component.getOffset();
+			if (component.isBitFieldComponent()) {
+				BitFieldDataType bitField = (BitFieldDataType) component.getDataType();
+				curOffset += bitField.getBitOffset();
+			}
+
+			// As long as we're on a byte boundary, we have a separate addressable field
+			if (curOffset % 8 == 0) {
 				if (!components.isEmpty()) {
-					fields.add(new Field(struct, type, offset, endOffset, components));
+					fields.add(new Field(struct, bitOffset / 8, curOffset / 8, components));
 					components.clear();
 				}
-
-				type = component.getDataType();
-				offset = curOffset;
-				if (component.isBitFieldComponent()) {
-					type = ((BitFieldDataType) type).getBaseDataType();
-				}
-				endOffset = offset + type.getLength();
+				bitOffset = curOffset;
 			}
 
 			components.add(component);
 		}
 
 		if (!components.isEmpty()) {
-			fields.add(new Field(struct, type, offset, endOffset, components));
+			int endOffset = components.get(components.size() - 1).getEndOffset() + 1;
+			fields.add(new Field(struct, bitOffset / 8, endOffset, components));
 		}
 
 		return ImmutableList.copyOf(fields);
@@ -154,31 +154,9 @@ public class Field {
 	 * Copy this field into a new structure.
 	 */
 	public void copyTo(Structure struct) {
-		int nFields = struct.getNumComponents();
-		int offset = 0;
-		if (nFields > 0) {
-			DataTypeComponent last = struct.getComponent(nFields - 1);
-			offset = last.getEndOffset() + 1;
+		for (DataTypeComponent field : this.components) {
+			DataTypes.addField(struct, field);
 		}
-
-		DataTypeComponent first = this.components.get(0);
-		int align = first.getDataType().getAlignment();
-		if (offset % align != 0) {
-			offset += align - (offset % align);
-		}
-		copyAtOffset(struct, offset, first);
-
-		for (DataTypeComponent field : this.components.subList(1, this.components.size())) {
-			int delta = field.getOffset() - first.getOffset();
-			copyAtOffset(struct, offset + delta, field);
-		}
-	}
-
-	/**
-	 * Copy a (bit)field into a new structure at the given byte offset.
-	 */
-	private static void copyAtOffset(Structure struct, int offset, DataTypeComponent field) {
-		struct.insertAtOffset(offset, field.getDataType(), field.getLength(), field.getFieldName(), field.getComment());
 	}
 
 	@Override
