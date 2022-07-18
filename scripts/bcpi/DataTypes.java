@@ -125,7 +125,6 @@ public class DataTypes {
 			DataType baseType = bitField.getBaseDataType();
 
 			int bitSize = bitField.getBitSize();
-			int byteWidth = (bitSize + 7) / 8;
 			int byteOffset = 0;
 			int bitOffset = 0;
 
@@ -159,6 +158,8 @@ public class DataTypes {
 					}
 				}
 			}
+
+			int byteWidth = BitFieldDataType.getMinimumStorageSize(bitSize, bitOffset);
 
 			try {
 				struct.insertBitFieldAt(byteOffset, byteWidth, bitOffset, baseType, bitSize, field.getFieldName(), field.getComment());
