@@ -6,14 +6,15 @@ import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.util.Msg;
 
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -55,8 +56,8 @@ public class AccessPatterns {
 			return;
 		}
 
-		SetMultimap<Structure, Field> reads = HashMultimap.create();
-		SetMultimap<Structure, Field> writes = HashMultimap.create();
+		Map<Structure, BitSet> reads = new HashMap<>();
+		Map<Structure, BitSet> writes = new HashMap<>();
 
 		Set<CodeBlock> blocks = getCodeBlocksThrough(row.function, row.address);
 		for (CodeBlock block : blocks) {
@@ -67,9 +68,11 @@ public class AccessPatterns {
 				}
 
 				for (FieldReference ref : this.refs.getFields(address)) {
-					Field field = ref.getField();
-					Structure struct = field.getParent();
-					(ref.isRead() ? reads : writes).put(struct, field);
+					for (FieldReference structRef : ref.getStructRefs()) {
+						(structRef.isRead() ? reads : writes)
+							.computeIfAbsent((Structure) structRef.getOuterType(), k -> new BitSet())
+							.set(structRef.getOffset(), structRef.getEndOffset());
+					}
 				}
 			}
 		}
@@ -80,7 +83,9 @@ public class AccessPatterns {
 		}
 
 		for (Structure struct : Sets.union(reads.keySet(), writes.keySet())) {
-			AccessPattern pattern = new AccessPattern(reads.get(struct), writes.get(struct));
+			BitSet read = reads.getOrDefault(struct, new BitSet());
+			BitSet written = writes.getOrDefault(struct, new BitSet());
+			AccessPattern pattern = new AccessPattern(struct, read, written);
 			this.patterns
 				.computeIfAbsent(struct, k -> ConcurrentHashMap.newKeySet())
 				.add(pattern);

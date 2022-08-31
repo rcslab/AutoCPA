@@ -1,34 +1,110 @@
 package bcpi;
 
+import ghidra.program.model.data.Composite;
+import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.DataTypeComponent;
+import ghidra.program.model.data.Structure;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
  * Metadata about a struct field reference.
  */
 public class FieldReference {
-	private final Field field;
-	private final boolean arrayAccess;
-	private final boolean isRead;
+	private final Composite outerType;
+	private final boolean outerArray;
+	private final int offset;
+	private final int size;
+	private final boolean read;
 
-	FieldReference(Field field, boolean arrayAccess, boolean isRead) {
-		this.field = field;
-		this.arrayAccess = arrayAccess;
-		this.isRead = isRead;
+	FieldReference(Composite outerType, boolean outerArray, int offset, int size, boolean read) {
+		Objects.checkFromIndexSize(offset, size, outerType.getLength());
+		this.outerType = outerType;
+		this.outerArray = outerArray;
+		this.offset = offset;
+		this.size = size;
+		this.read = read;
 	}
 
-	/** The field being accessed. */
-	public Field getField() {
-		return this.field;
+	/**
+	 * @return The type of the outermost object whose field is being accessed.
+	 */
+	public Composite getOuterType() {
+		return this.outerType;
 	}
 
-	/** Whether this field was accessed as part of an array. */
-	public boolean isArrayAccess() {
-		return this.arrayAccess;
+	/**
+	 * @return Whether the outermost object is part of an array.
+	 */
+	public boolean isOuterArray() {
+		return this.outerArray;
 	}
 
-	/** Whether this access was a read access. */
+	/**
+	 * @return The offset of the memory access into the outer object.
+	 */
+	public int getOffset() {
+		return this.offset;
+	}
+
+	/**
+	 * @return The size of this memory access in bytes.
+	 */
+	public int getSize() {
+		return this.size;
+	}
+
+	/**
+	 * @return The (exclusive) end offset of the memory access into the outer object.
+	 */
+	public int getEndOffset() {
+		return this.offset + this.size;
+	}
+
+	/**
+	 * @return Whether this access was a read access.
+	 */
 	public boolean isRead() {
-		return this.isRead;
+		return this.read;
+	}
+
+	/**
+	 * @return All (sub)structures referenced by this access.
+	 */
+	public List<FieldReference> getStructRefs() {
+		List<FieldReference> refs = new ArrayList<>();
+		collectStructRefs(refs);
+		return refs;
+	}
+
+	private void collectStructRefs(List<FieldReference> refs) {
+		if (!(this.outerType instanceof Structure)) {
+			// TODO: Handle unions
+			return;
+		}
+
+		refs.add(this);
+
+		for (DataTypeComponent field : this.outerType.getDefinedComponents()) {
+			DataType type = field.getDataType();
+			type = DataTypes.resolve(type);
+			if (!(type instanceof Composite)) {
+				continue;
+			}
+
+			// Clip the memory access to the bounds of the field
+			int offset = field.getOffset();
+			int start = Math.max(getOffset(), field.getOffset());
+			int end = Math.min(getEndOffset(), field.getEndOffset() + 1);
+
+			if (start < end) {
+				Composite outerType = (Composite) DataTypes.dedup(type);
+				new FieldReference(outerType, this.outerArray, start - offset, end - start, this.read)
+					.collectStructRefs(refs);
+			}
+		}
 	}
 
 	@Override
@@ -40,22 +116,23 @@ public class FieldReference {
 		}
 
 		FieldReference other = (FieldReference) obj;
-		return this.field.equals(other.field)
-			&& this.arrayAccess == other.arrayAccess
-			&& this.isRead == other.isRead;
+		return this.outerType.equals(other.outerType)
+			&& this.outerArray == other.outerArray
+			&& this.offset == other.offset
+			&& this.size == other.size
+			&& this.read == other.read;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(this.field, this.arrayAccess, this.isRead);
+		return Objects.hash(this.outerType, this.outerArray, this.offset, this.size, this.read);
 	}
 
 	@Override
 	public String toString() {
-		String parent = this.field.getParent().getName();
-		String array = this.arrayAccess ? "[]" : "";
-		String name = this.field.getFieldName();
-		String rw = this.isRead ? "R" : "W";
-		return String.format("%s%s::%s(%s)", parent, array, name, rw);
+		String type = DataTypes.formatCDecl(this.outerType);
+		String array = this.outerArray ? "[]" : "";
+		String rw = this.read ? "R" : "W";
+		return String.format("(%s%s + %d)%s(%d)", type, array, this.offset, rw, this.size);
 	}
 }

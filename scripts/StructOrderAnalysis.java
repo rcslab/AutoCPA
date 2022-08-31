@@ -514,7 +514,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			out.println("    max-height: 100vh;");
 			out.println("    overflow-y: scroll;");
 			out.println("}");
-			out.println(".pattern ul {");
+			out.println(".pattern ul.functions {");
 			out.println("    columns: 2;");
 			out.println("    column-fill: auto;");
 			out.println("    max-height: 120px;");
@@ -702,8 +702,8 @@ public class StructOrderAnalysis extends GhidraScript {
 			}
 
 			for (Field field : pattern.getFields()) {
-				boolean read = pattern.getReadFields().contains(field);
-				boolean written = pattern.getWrittenFields().contains(field);
+				boolean read = pattern.reads(field);
+				boolean written = pattern.writes(field);
 
 				for (DataTypeComponent component : field.getComponents()) {
 					String name = component.getFieldName();
@@ -902,17 +902,48 @@ public class StructOrderAnalysis extends GhidraScript {
 
 			long count = patterns.getCount(pattern);
 			int percentage = percent(count, total);
-			out.format("%d%% (%,d times)<br><code>%s</code>\n", percentage, count, pattern);
+			out.format("%d%% (%,d times)<br>\n", percentage, count);
 
-			out.println("<ul>");
+			renderAccessPattern(pattern, "", out);
+
+			out.println("Occurs in");
+			out.println("<ul class='functions'>");
 			patterns.getFunctions(pattern)
 				.stream()
 				.map(f -> f.getName())
 				.sorted()
+				.map(f -> htmlEscape(f))
 				.forEach(f -> out.format("<li><code>%s()</code>\n", f));
 			out.println("</ul>");
 
 			++id;
+		}
+
+		out.println("</ul>");
+	}
+
+	private void renderAccessPattern(AccessPattern pattern, String fieldName, PrintWriter out) {
+		String decl = DataTypes.formatCDecl(pattern.getType(), fieldName);
+
+		out.println("<code>" + htmlEscape(decl) + "</code>");
+		out.println("<ul>");
+
+		for (DataTypeComponent field : pattern.getType().getDefinedComponents()) {
+			if (!pattern.accesses(field)) {
+				continue;
+			}
+
+			out.print("<li>");
+
+			AccessPattern proj = pattern.project(field);
+			if (proj == null) {
+				String r = pattern.reads(field) ? "R" : "";
+				String w = pattern.writes(field) ? "W" : "";
+				String fieldDecl = DataTypes.formatCDecl(field.getDataType(), field.getFieldName());
+				out.format("<code>%s <strong>(%s%s)</strong></code>\n", htmlEscape(fieldDecl), r, w);
+			} else {
+				renderAccessPattern(proj, field.getFieldName(), out);
+			}
 		}
 
 		out.println("</ul>");

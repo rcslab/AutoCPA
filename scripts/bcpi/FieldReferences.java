@@ -2,7 +2,7 @@ package bcpi;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
-import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.Composite;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.pcode.HighFunction;
@@ -166,14 +166,15 @@ public class FieldReferences {
 			return;
 		}
 
-		DataType type = facts.getType();
+		Composite type = facts.getType();
 		int offset = facts.getOffset().getAsInt();
-		int endOffset = offset + value.getSize();
+		int size = value.getSize();
 
-		Set<FieldReference> fields = updateFields(op.getSeqnum().getTarget());
-		DataTypes.getFieldsBetween(type, offset, endOffset)
-			.stream()
-			.map(f -> new FieldReference(f, facts.isArray(), isRead))
-			.forEach(fields::add);
+		if (offset < 0 || offset + size > type.getLength()) {
+			return;
+		}
+
+		updateFields(op.getSeqnum().getTarget())
+			.add(new FieldReference(type, facts.isArray(), offset, size, isRead));
 	}
 }

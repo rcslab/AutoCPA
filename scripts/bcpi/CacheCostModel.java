@@ -3,6 +3,7 @@ package bcpi;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.Structure;
 
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
@@ -40,23 +41,35 @@ public class CacheCostModel implements CostModel<Structure> {
 	 * Compute a fast mapping between the original and optimized fields, since the
 	 * access patterns refer to the original fields.
 	 */
-	private Field[] getFieldPermutation(List<Field> fields) {
+	private int[] getFieldPermutation(List<Field> fields) {
 		Map<String, Field> fieldMap = fields
 			.stream()
 			.collect(Collectors.toMap(f -> f.getFieldName(), f -> f));
 
-		Field[] fieldPerm = new Field[this.original.getNumComponents()];
+		int[] bytePerm = new int[this.original.getLength()];
+		Arrays.fill(bytePerm, -1);
+
 		for (Field origField : this.originalFields) {
 			Field optField = fieldMap.get(origField.getFieldName());
-			fieldPerm[origField.getOrdinal()] = optField;
+			if (optField == null) {
+				continue;
+			}
+
+			int start = origField.getOffset();
+			int end = Math.min(origField.getEndOffset(), bytePerm.length);
+			int delta = optField.getOffset() - start;
+			for (int i = start; i < end; ++i) {
+				bytePerm[i] = i + delta;
+			}
 		}
-		return fieldPerm;
+
+		return bytePerm;
 	}
 
 	@Override
 	public long cost(Structure struct) {
 		List<Field> fields = Field.allFields(struct);
-		Field[] fieldPerm = getFieldPermutation(fields);
+		int[] bytePerm = getFieldPermutation(fields);
 
 		// As a heuristic, assume offset zero is twice as likely as the next possible
 		// offset, which is twice as likely as the next one, etc.
@@ -78,16 +91,11 @@ public class CacheCostModel implements CostModel<Structure> {
 			for (AccessPattern pattern : this.patterns.getRankedPatterns(this.original)) {
 				long count = this.patterns.getCount(pattern);
 
-				for (Field origField : pattern.getFields()) {
-					Field optField = fieldPerm[origField.getOrdinal()];
-					if (optField == null) {
-						continue;
-					}
-
-					int start = (offset + optField.getOffset()) / CACHE_LINE;
-					int end = (offset + optField.getEndOffset() - 1) / CACHE_LINE;
-					touchedLines.set(start, end + 1);
-				}
+				pattern.getBytes()
+					.stream()
+					.map(i -> bytePerm[i])
+					.filter(i -> i >= 0)
+					.forEach(i -> touchedLines.set(i / CACHE_LINE));
 
 				cost += count * touchedLines.cardinality();
 
