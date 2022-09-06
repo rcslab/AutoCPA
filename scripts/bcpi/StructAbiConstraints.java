@@ -33,7 +33,13 @@ public class StructAbiConstraints {
 			.collect(Collectors.toMap(i -> this.fields.get(i).getFieldName(), i -> i));
 
 		this.fixed = new int[nFields];
-		Arrays.fill(this.fixed, -1);
+		for (int i = 0; i < nFields; ++i) {
+			if (this.fields.get(i).isSuperClass()) {
+				this.fixed[i] = i;
+			} else {
+				this.fixed[i] = -1;
+			}
+		}
 
 		this.groups = new int[nFields];
 		Arrays.fill(this.groups, -1);
