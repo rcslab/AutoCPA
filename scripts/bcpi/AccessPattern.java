@@ -129,7 +129,7 @@ public class AccessPattern {
 		if (type instanceof Composite) {
 			type = DataTypes.dedup(type);
 			BitSet read = this.read.get(field.getOffset(), field.getEndOffset() + 1);
-			BitSet written = this.read.get(field.getOffset(), field.getEndOffset() + 1);
+			BitSet written = this.written.get(field.getOffset(), field.getEndOffset() + 1);
 			return new AccessPattern((Composite) type, read, written);
 		} else {
 			return null;
