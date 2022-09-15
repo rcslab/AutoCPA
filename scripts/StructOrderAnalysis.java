@@ -286,9 +286,11 @@ public class StructOrderAnalysis extends GhidraScript {
 
 	private void getAllPrograms(DomainFolder folder, List<Program> programs) throws Exception {
 		for (DomainFile file : folder.getFiles()) {
-			DomainObject object = file.getDomainObject(this, true, false, this.monitor);
+			DomainObject object = file.getImmutableDomainObject(this, DomainFile.DEFAULT_VERSION, this.monitor);
 			if (object instanceof Program) {
 				programs.add((Program) object);
+			} else {
+				object.release(this);
 			}
 		}
 
