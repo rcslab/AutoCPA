@@ -1,0 +1,48 @@
+diff --git a/Ghidra/Features/Decompiler/src/decompile/cpp/heritage.cc b/Ghidra/Features/Decompiler/src/decompile/cpp/heritage.cc
+index e8af0c939..5ae6b6535 100644
+--- a/Ghidra/Features/Decompiler/src/decompile/cpp/heritage.cc
++++ b/Ghidra/Features/Decompiler/src/decompile/cpp/heritage.cc
+@@ -1315,6 +1315,7 @@ void Heritage::guardCalls(uint4 fl,const Address &addr,int4 size,vector<Varnode
+     // We do not guard the call if the effect is "unaffected" or "reload"
+     if ((effecttype == EffectRecord::unknown_effect)||(effecttype == EffectRecord::return_address)) {
+       indop = fd->newIndirectOp(fc->getOp(),addr,size,0);
++      indop->setStopTypePropagation();
+       indop->getIn(0)->setActiveHeritage();
+       indop->getOut()->setActiveHeritage();
+       write.push_back(indop->getOut());
+@@ -1325,6 +1326,7 @@ void Heritage::guardCalls(uint4 fl,const Address &addr,int4 size,vector<Varnode
+     }
+     else if (effecttype == EffectRecord::killedbycall) {
+       indop = fd->newIndirectCreation(fc->getOp(),addr,size,possibleoutput);
++      indop->setStopTypePropagation();
+       indop->getOut()->setActiveHeritage();
+       write.push_back(indop->getOut());
+     }
+diff --git a/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java b/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java
+index 3cd5a394b..891ead4dd 100644
+--- a/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java
++++ b/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java
+@@ -50,6 +50,11 @@ public enum Platform {
+ 	 */
+ 	LINUX_ARM_64(OperatingSystem.LINUX, Architecture.ARM_64, "linux_arm_64", ".so", ""),
+ 
++	/**
++	 * Identifies a FreeBSD x86 64-bit OS.
++	 */
++	FREEBSD_X86_64(OperatingSystem.FREEBSD, Architecture.X86_64, "freebsd_amd64", ".so", ""),
++
+ 	/**
+ 	 * Identifies a macOS x86 32-bit OS.
+ 	 */
+diff --git a/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java b/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java
+index 1abe4d34b..fe3d49276 100644
+--- a/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java
++++ b/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java
+@@ -20,6 +20,7 @@ public enum OperatingSystem {
+ 	WINDOWS("Windows"),
+ 	LINUX("Linux"),
+ 	MAC_OS_X("Mac OS X"),
++	FREEBSD("FreeBSD"),
+ 	UNSUPPORTED("Unsupported Operating System");
+ 
+ 	/**
