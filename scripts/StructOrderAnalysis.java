@@ -893,6 +893,7 @@ public class StructOrderAnalysis extends GhidraScript {
 	private void renderAccessPatterns(Structure struct, AccessPatterns patterns, PrintWriter out) {
 		out.println("<ul>");
 
+		String decl = DataTypes.formatCDecl(struct);
 		long total = patterns.getCount(struct);
 		List<AccessPattern> structPatterns = patterns.getRankedPatterns(struct);
 		int id = 0;
@@ -906,7 +907,7 @@ public class StructOrderAnalysis extends GhidraScript {
 			int percentage = percent(count, total);
 			out.format("%d%% (%,d times)<br>\n", percentage, count);
 
-			renderAccessPattern(pattern, "", out);
+			renderAccessPattern(pattern, decl, out);
 
 			out.println("Occurs in");
 			out.println("<ul class='functions'>");
@@ -924,9 +925,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		out.println("</ul>");
 	}
 
-	private void renderAccessPattern(AccessPattern pattern, String fieldName, PrintWriter out) {
-		String decl = DataTypes.formatCDecl(pattern.getType(), fieldName);
-
+	private void renderAccessPattern(AccessPattern pattern, String decl, PrintWriter out) {
 		out.println("<code>" + htmlEscape(decl) + "</code>");
 		out.println("<ul>");
 
@@ -937,14 +936,14 @@ public class StructOrderAnalysis extends GhidraScript {
 
 			out.print("<li>");
 
+			String fieldDecl = DataTypes.formatCDecl(field.getDataType(), field.getFieldName());
 			AccessPattern proj = pattern.project(field);
 			if (proj == null) {
 				String r = pattern.reads(field) ? "R" : "";
 				String w = pattern.writes(field) ? "W" : "";
-				String fieldDecl = DataTypes.formatCDecl(field.getDataType(), field.getFieldName());
 				out.format("<code>%s <strong>(%s%s)</strong></code>\n", htmlEscape(fieldDecl), r, w);
 			} else {
-				renderAccessPattern(proj, field.getFieldName(), out);
+				renderAccessPattern(proj, fieldDecl, out);
 			}
 		}
 

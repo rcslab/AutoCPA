@@ -35,6 +35,13 @@ public class DataTypes {
 	private static final Set<Equivalence.Wrapper<DataType>> dedupSeen = ConcurrentHashMap.newKeySet();
 
 	/**
+	 * Check if two data types are the same.
+	 */
+	public static boolean areEqual(DataType type, DataType other) {
+		return type.getDataTypePath().equals(other.getDataTypePath());
+	}
+
+	/**
 	 * Deduplicate a DataType.
 	 */
 	public static DataType dedup(DataType type) {

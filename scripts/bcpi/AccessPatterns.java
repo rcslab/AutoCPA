@@ -2,6 +2,8 @@ package bcpi;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
+import ghidra.program.model.data.Composite;
+import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.util.Msg;
@@ -68,10 +70,11 @@ public class AccessPatterns {
 				}
 
 				for (FieldReference ref : this.refs.getFields(address)) {
-					for (FieldReference structRef : ref.getStructRefs()) {
-						(structRef.isRead() ? reads : writes)
-							.computeIfAbsent((Structure) structRef.getOuterType(), k -> new BitSet())
-							.set(structRef.getOffset(), structRef.getEndOffset());
+					Composite type = ref.getOuterType();
+					if (type instanceof Structure) {
+						(ref.isRead() ? reads : writes)
+							.computeIfAbsent((Structure) type, k -> new BitSet())
+							.set(ref.getOffset(), ref.getEndOffset());
 					}
 				}
 			}
@@ -86,15 +89,33 @@ public class AccessPatterns {
 			BitSet read = reads.getOrDefault(struct, new BitSet());
 			BitSet written = writes.getOrDefault(struct, new BitSet());
 			AccessPattern pattern = new AccessPattern(struct, read, written);
-			this.patterns
-				.computeIfAbsent(struct, k -> ConcurrentHashMap.newKeySet())
-				.add(pattern);
-			this.counts
-				.computeIfAbsent(pattern, k -> new LongAdder())
-				.add(count);
-			this.functions
-				.computeIfAbsent(pattern, k -> ConcurrentHashMap.newKeySet())
-				.add(row.function);
+			addProjections(pattern, count, row.function);
+		}
+	}
+
+	/**
+	 * Record an access pattern and its projections onto sub-structs.
+	 */
+	private void addProjections(AccessPattern pattern, long count, Function func) {
+		Structure struct = (Structure) pattern.getType();
+
+		this.patterns
+			.computeIfAbsent(struct, k -> ConcurrentHashMap.newKeySet())
+			.add(pattern);
+		this.counts
+			.computeIfAbsent(pattern, k -> new LongAdder())
+			.add(count);
+		this.functions
+			.computeIfAbsent(pattern, k -> ConcurrentHashMap.newKeySet())
+			.add(func);
+
+		for (DataTypeComponent field : struct.getDefinedComponents()) {
+			if (pattern.accesses(field)) {
+				AccessPattern proj = pattern.project(field);
+				if (proj != null && proj.getType() instanceof Structure) {
+					addProjections(proj, count, func);
+				}
+			}
 		}
 	}
 

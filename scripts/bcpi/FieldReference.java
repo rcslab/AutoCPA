@@ -70,43 +70,6 @@ public class FieldReference {
 		return this.read;
 	}
 
-	/**
-	 * @return All (sub)structures referenced by this access.
-	 */
-	public List<FieldReference> getStructRefs() {
-		List<FieldReference> refs = new ArrayList<>();
-		collectStructRefs(refs);
-		return refs;
-	}
-
-	private void collectStructRefs(List<FieldReference> refs) {
-		if (!(this.outerType instanceof Structure)) {
-			// TODO: Handle unions
-			return;
-		}
-
-		refs.add(this);
-
-		for (DataTypeComponent field : this.outerType.getDefinedComponents()) {
-			DataType type = field.getDataType();
-			type = DataTypes.resolve(type);
-			if (!(type instanceof Composite)) {
-				continue;
-			}
-
-			// Clip the memory access to the bounds of the field
-			int offset = field.getOffset();
-			int start = Math.max(getOffset(), field.getOffset());
-			int end = Math.min(getEndOffset(), field.getEndOffset() + 1);
-
-			if (start < end) {
-				Composite outerType = (Composite) DataTypes.dedup(type);
-				new FieldReference(outerType, this.outerArray, start - offset, end - start, this.read)
-					.collectStructRefs(refs);
-			}
-		}
-	}
-
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == this) {
