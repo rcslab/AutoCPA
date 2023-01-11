@@ -1,5 +1,8 @@
 package bcpi;
 
+import bcpi.dataflow.BcpiDomain;
+import bcpi.dataflow.DataFlow;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.data.Composite;
@@ -68,14 +71,22 @@ public class FieldReferences {
 			.parallelStream()
 			.map(f -> this.decomp.decompile(f))
 			.filter(f -> f != null)
-			.forEach(f -> computeDataFlow(BcpiConfig.IPA_DEPTH, f, new PcodeDataFlow()));
+			.forEach(f -> computeDataFlow(BcpiConfig.IPA_DEPTH, f));
 	}
 
 	/**
 	 * Compute data flow facts for a specific function.
 	 */
-	private void computeDataFlow(int depth, HighFunction highFunc, PcodeDataFlow dataFlow) {
-		Iterable<PcodeOpAST> ops = () -> highFunc.getPcodeOps();
+	private void computeDataFlow(int depth, HighFunction highFunc) {
+		var dataFlow = new DataFlow<>(BcpiDomain.bottom());
+		computeDataFlow(depth, highFunc, dataFlow);
+	}
+
+	/**
+	 * Compute data flow facts for a specific function.
+	 */
+	private void computeDataFlow(int depth, HighFunction highFunc, DataFlow<BcpiDomain> dataFlow) {
+		Iterable<PcodeOpAST> ops = highFunc::getPcodeOps;
 		for (PcodeOp op : ops) {
 			processPcodeOp(depth, highFunc, dataFlow, op);
 		}
@@ -84,7 +95,7 @@ public class FieldReferences {
 	/**
 	 * Process a single pcode instruction.
 	 */
-	private void processPcodeOp(int depth, HighFunction highFunc, PcodeDataFlow dataFlow, PcodeOp op) {
+	private void processPcodeOp(int depth, HighFunction highFunc, DataFlow<BcpiDomain> dataFlow, PcodeOp op) {
 		switch (op.getOpcode()) {
 			case PcodeOp.CALL:
 				processPcodeCall(depth, highFunc, dataFlow, op);
@@ -99,7 +110,7 @@ public class FieldReferences {
 	/**
 	 * Process a function call.
 	 */
-	private void processPcodeCall(int depth, HighFunction highFunc, PcodeDataFlow dataFlow, PcodeOp op) {
+	private void processPcodeCall(int depth, HighFunction highFunc, DataFlow<BcpiDomain> dataFlow, PcodeOp op) {
 		if (depth == 0) {
 			return;
 		}
@@ -121,19 +132,8 @@ public class FieldReferences {
 			return;
 		}
 
-		LocalSymbolMap locals = highTarget.getLocalSymbolMap();
-		PcodeDataFlow nestedFlow = new PcodeDataFlow();
-		for (int i = 0; i < locals.getNumParams() && i + 1 < inputs.length; ++i) {
-			HighParam param = locals.getParam(i);
-			if (param == null) {
-				continue;
-			}
-			for (Varnode vn : param.getInstances()) {
-				// Copy facts from the call arguments to the formal parameters
-				Facts facts = dataFlow.getFacts(inputs[i + 1]);
-				nestedFlow.setFacts(vn, facts);
-			}
-		}
+		var nestedState = BcpiDomain.forCall(op, highTarget, dataFlow);
+		var nestedFlow = new DataFlow<>(nestedState);
 
 		FieldReferences nestedRefs = nested();
 		nestedRefs.computeDataFlow(depth - 1, highTarget, nestedFlow);
@@ -151,7 +151,7 @@ public class FieldReferences {
 	/**
 	 * Process a memory load/store instruction.
 	 */
-	private void processPcodeLoadStore(PcodeDataFlow dataFlow, PcodeOp op) {
+	private void processPcodeLoadStore(DataFlow<BcpiDomain> dataFlow, PcodeOp op) {
 		boolean isRead = op.getOpcode() == PcodeOp.LOAD;
 
 		// input1: Varnode containing pointer offset (to data|of destination)
@@ -161,20 +161,24 @@ public class FieldReferences {
 		// STORE: input2: Varnode containing data to be stored.
 		Varnode value = isRead ? op.getOutput() : op.getInput(2);
 
-		Facts facts = dataFlow.getFacts(ptr);
+		var state = dataFlow.fixpoint(ptr);
+		var facts = state.getPtrFacts(ptr);
 		if (!facts.hasType() || !facts.hasOffset()) {
 			return;
 		}
 
-		Composite type = facts.getType();
+		var type = facts.getType().get();
+		if (!(type instanceof Composite)) {
+			return;
+		}
+
 		int offset = facts.getOffset().getAsInt();
 		int size = value.getSize();
-
 		if (offset < 0 || offset + size > type.getLength()) {
 			return;
 		}
 
 		updateFields(op.getSeqnum().getTarget())
-			.add(new FieldReference(type, facts.isArray(), offset, size, isRead));
+			.add(new FieldReference((Composite) type, facts.isMaybeArray(), offset, size, isRead));
 	}
 }
