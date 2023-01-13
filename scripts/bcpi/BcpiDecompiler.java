@@ -2,106 +2,247 @@ package bcpi;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
+import ghidra.app.decompiler.DecompileProcess;
 import ghidra.app.decompiler.DecompileResults;
-import ghidra.app.decompiler.parallel.DecompileConfigurer;
-import ghidra.app.decompiler.parallel.DecompilerCallback;
-import ghidra.app.decompiler.parallel.ParallelDecompiler;
+import ghidra.framework.model.Project;
+import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.PackedDecode;
+import ghidra.program.model.pcode.PcodeDataTypeManager;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
-import generic.concurrent.GThreadPool;
-
 import com.google.common.base.Throwables;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Multimaps;
 
-import java.util.Collection;
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * Wrapper around Ghidra's pcode decompiler.
+ * Wrapper around Ghidra's decompiler.
  */
 public class BcpiDecompiler {
-	private final ConcurrentMap<Function, HighFunction> pcode = new ConcurrentHashMap<>();
-	private final Set<Function> warned = ConcurrentHashMap.newKeySet();
+	/** The path to the on-disk cache directory. */
+	private final Path diskCache;
+	/** The active decompiler processes. */
+	private final ConcurrentMap<Program, Queue<CachingDecompiler>> decompilers = new ConcurrentHashMap<>();
+	/** Cache of failed decompilations. */
+	private final Set<Function> failed = ConcurrentHashMap.newKeySet();
 
-	public void decompile(Collection<Function> funcs) {
-		// Bump up the thread count
-		int threads = 2 * Runtime.getRuntime().availableProcessors();
-		GThreadPool
-			.getSharedThreadPool("Parallel Decompiler")
-			.setMaxThreadCount(threads);
-
-		// Group functions by program since Ghidra requires it
-		Multimap<Program, Function> index = Multimaps.index(funcs, Function::getProgram);
-		for (Program program : index.keySet()) {
-			decompile(program, index.get(program));
-		}
+	/**
+	 * Create a BcpiDecompiler for the given project.
+	 */
+	public BcpiDecompiler(Project project) {
+		this.diskCache = project.getProjectLocator().getProjectDir().toPath().resolve("decomp");
 	}
 
-	private void decompile(Program program, Collection<Function> functions) {
-		Msg.info(this, String.format("%s: decompiling %,d functions", program.getName(), functions.size()));
+	/**
+	 * @return The path to the cached decompilation of the given function.
+	 */
+	private Path getCachePath(Function func) {
+		return this.diskCache.resolve(String.valueOf(func.getID()));
+	}
 
-		DecompileConfigurer config = new DecompileConfigurer() {
-			@Override
-			public void configure(DecompInterface decompiler) {
-				decompiler.toggleCCode(true);
-				decompiler.toggleSyntaxTree(true);
-				decompiler.setSimplificationStyle("decompile");
+	/**
+	 * Decompile the given function.
+	 */
+	public HighFunction decompile(Function func) {
+		if (failed.contains(func)) {
+			return null;
+		}
 
-				DecompileOptions xmlOptions = new DecompileOptions();
-				xmlOptions.setDefaultTimeout(60);
-				xmlOptions.setMaxPayloadMBytes(128);
-				decompiler.setOptions(xmlOptions);
-			}
-		};
-
-		DecompilerCallback<Void> callback = new DecompilerCallback<Void>(program, config) {
-			@Override
-			public Void process(DecompileResults results, TaskMonitor monitor) {
-				processDecompilation(results);
-				return null;
-			}
-		};
-
+		HighFunction result = null;
 		try {
-			ParallelDecompiler.decompileFunctions(callback, functions, TaskMonitor.DUMMY);
-		} catch (Exception e) {
-			throw Throwables.propagate(e);
-		} finally {
-			callback.dispose();
-		}
-	}
-
-	/**
-	 * Process a single decompiled function.
-	 */
-	private void processDecompilation(DecompileResults results) {
-		Function function = results.getFunction();
-		HighFunction highFunc = results.getHighFunction();
-		if (highFunc == null) {
-			Msg.warn(this, function.getName() + ": " + results.getErrorMessage().strip());
-			return;
-		}
-
-		this.pcode.put(function, highFunc);
-	}
-
-	/**
-	 * @return The decompiled pcode for the given function.
-	 */
-	public HighFunction getPcode(Function function) {
-		HighFunction result = this.pcode.get(function);
-		if (result == null) {
-			if (this.warned.add(function)) {
-				Msg.warn(this, "Couldn't find pcode for " + function);
+			result = checkDiskCache(func);
+		} catch (Throwable e) {
+			while (e.getClass() == RuntimeException.class) {
+				var cause = e.getCause();
+				if (cause == null) {
+					break;
+				} else {
+					e = cause;
+				}
 			}
+			Msg.error(this, "Error decompiling " + func.getName(), e);
+		}
+
+		if (result == null) {
+			failed.add(func);
 		}
 		return result;
+	}
+
+	/**
+	 * Check the on-disk cache for decompilation results.
+	 */
+	private HighFunction checkDiskCache(Function func) {
+		var path = getCachePath(func);
+		if (!Files.exists(path)) {
+			return invokeDecompiler(func);
+		}
+
+		try (var stream = new BufferedInputStream(Files.newInputStream(path))) {
+			var program = func.getProgram();
+			var decoder = new PackedDecode(program.getAddressFactory());
+			decoder.open(128 << 20, path.toString());
+
+			while (true) {
+				stream.mark(1);
+				int b = stream.read();
+				if (b < 0) {
+					break;
+				}
+				stream.reset();
+				decoder.ingestStream(stream);
+			}
+
+			decoder.endIngest();
+
+			var lang = program.getLanguage();
+			var cspec = program.getCompilerSpec();
+			var dtManager = new PcodeDataTypeManager(program);
+			var results = new DecompileResults(func, lang, cspec, dtManager, "", decoder, DecompileProcess.DisposeState.NOT_DISPOSED);
+			return results.getHighFunction();
+		} catch (Exception e) {
+			throw Throwables.propagate(e);
+		}
+	}
+
+	/**
+	 * Invoke the actual decompiler on a cache miss.
+	 */
+	private HighFunction invokeDecompiler(Function func) {
+		var program = func.getProgram();
+		var queue = this.decompilers.computeIfAbsent(program, p -> new ConcurrentLinkedQueue<>());
+
+		var decomp = queue.poll();
+		if (decomp == null) {
+			decomp = new CachingDecompiler(program);
+		}
+
+		try {
+			var results = decomp.decompileFunction(func, 0, TaskMonitor.DUMMY);
+
+			String error = results.getErrorMessage().strip();
+			if (!results.decompileCompleted()) {
+				Msg.error(this, func.getName() + ": " + error);
+			} else if (!error.isEmpty()) {
+				Msg.warn(this, func.getName() + ": " + error);
+			}
+
+			return results.getHighFunction();
+		} finally {
+			queue.offer(decomp);
+		}
+	}
+
+	/**
+	 * A decompiler subclass that caches results.
+	 */
+	private class CachingDecompiler extends DecompInterface {
+		CachingDecompiler(Program program) {
+			toggleCCode(true);
+			toggleSyntaxTree(true);
+			setSimplificationStyle("decompile");
+
+			var xmlOptions = new DecompileOptions();
+			xmlOptions.setDefaultTimeout(60);
+			xmlOptions.setMaxPayloadMBytes(128);
+			setOptions(xmlOptions);
+
+			openProgram(program);
+		}
+
+		@Override
+		public DecompileResults decompileFunction(Function func, int timeout, TaskMonitor monitor) {
+			var program = func.getProgram();
+			var addrFactory = program.getAddressFactory();
+			var path = getCachePath(func);
+			this.baseEncodingSet.mainResponse = new CachingDecoder(addrFactory, path);
+
+			return super.decompileFunction(func, timeout, monitor);
+		}
+	}
+
+	/**
+	 * A decoder that caches the decompiler response.
+	 */
+	private static class CachingDecoder extends PackedDecode {
+		private final Path path;
+		private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+		CachingDecoder(AddressFactory addrFactory, Path path) {
+			super(addrFactory);
+			this.path = path;
+		}
+
+		@Override
+		public void clear() {
+			this.buffer.reset();
+			super.clear();
+		}
+
+		@Override
+		public void open(int max, String source) {
+			this.buffer.reset();
+			super.open(max, source);
+		}
+
+		@Override
+		public void ingestStream(InputStream stream) throws IOException {
+			// Ingest bytes from the stream up to (and including) the first 0 byte.
+			int size = buffer.size();
+			while (true) {
+				int b = stream.read();
+				if (b < 0) {
+					break;
+				}
+
+				buffer.write(b);
+				if (b == 0) {
+					break;
+				}
+			}
+		}
+
+		@Override
+		public void endIngest() {
+			try {
+				var buffer = this.buffer.toByteArray();
+
+				// Cache the response to disk
+				var dir = this.path.getParent();
+				Files.createDirectories(dir);
+				var tmp = Files.createTempFile(dir, null, null);
+				Files.write(tmp, buffer);
+				Files.move(tmp, this.path, StandardCopyOption.REPLACE_EXISTING);
+
+				// Copy the response to the underlying decoder
+				var stream = new ByteArrayInputStream(buffer);
+				while (stream.available() > 0) {
+					super.ingestStream(stream);
+				}
+				super.endIngest();
+			} catch (Exception e) {
+				throw Throwables.propagate(e);
+			}
+		}
+
+		@Override
+		public boolean isEmpty() {
+			return this.buffer.size() == 0;
+		}
 	}
 }

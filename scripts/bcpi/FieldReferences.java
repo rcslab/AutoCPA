@@ -66,7 +66,7 @@ public class FieldReferences {
 
 		functions
 			.parallelStream()
-			.map(f -> this.decomp.getPcode(f))
+			.map(f -> this.decomp.decompile(f))
 			.filter(f -> f != null)
 			.forEach(f -> computeDataFlow(BcpiConfig.IPA_DEPTH, f, new PcodeDataFlow()));
 	}
@@ -116,7 +116,7 @@ public class FieldReferences {
 			return;
 		}
 
-		HighFunction highTarget = this.decomp.getPcode(targetFunc);
+		HighFunction highTarget = this.decomp.decompile(targetFunc);
 		if (highTarget == null) {
 			return;
 		}

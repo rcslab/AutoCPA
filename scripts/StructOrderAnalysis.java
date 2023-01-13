@@ -261,8 +261,7 @@ public class StructOrderAnalysis extends GhidraScript {
 		BcpiControlFlow cfgs = new BcpiControlFlow(linker);
 		cfgs.addCoverage(data);
 
-		BcpiDecompiler decomp = new BcpiDecompiler();
-		decomp.decompile(cfgs.getCalledFunctions(funcs, BcpiConfig.IPA_DEPTH));
+		BcpiDecompiler decomp = new BcpiDecompiler(getState().getProject());
 
 		FieldReferences refs = new FieldReferences(linker, decomp, cfgs);
 		refs.collect(funcs);
