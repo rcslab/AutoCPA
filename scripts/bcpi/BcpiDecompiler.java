@@ -133,7 +133,8 @@ public class BcpiDecompiler {
 		}
 
 		try {
-			var results = decomp.decompileFunction(func, 0, TaskMonitor.DUMMY);
+			var timeout = decomp.getOptions().getDefaultTimeout();
+			var results = decomp.decompileFunction(func, timeout, TaskMonitor.DUMMY);
 
 			String error = results.getErrorMessage().strip();
 			if (!results.decompileCompleted()) {
