@@ -10,6 +10,8 @@ public class DebugAnalysis extends BcpiAnalysis {
 		for (var arg : args) {
 			if (arg.startsWith("pcode:")) {
 				debugPcode(arg.substring(6));
+			} else if (arg.startsWith("dataflow:")) {
+				debugDataFlow(arg.substring(9));
 			} else {
 				throw new IllegalArgumentException(arg);
 			}
@@ -24,5 +26,14 @@ public class DebugAnalysis extends BcpiAnalysis {
 			var highFunc = decomp.decompile(func);
 			new PcodeFormatter(ctx, highFunc).print();
 		}
+	}
+
+	private void debugDataFlow(String inst) {
+		var ctx = getContext();
+		var decomp = ctx.getDecompiler();
+		var addr = ctx.getAddress(inst);
+		var func = ctx.getFunctionContaining(addr);
+		var highFunc = decomp.decompile(func);
+		new PcodeFormatter(ctx, highFunc).printDataFlow(addr);
 	}
 }

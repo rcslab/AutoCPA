@@ -56,17 +56,24 @@ public class BcpiDomain implements Domain<BcpiDomain> {
 	}
 
 	/**
+	 * @return The abstract value for the given varnode.
+	 */
+	public BcpiVarDomain getFacts(Varnode vn) {
+		return this.vars.get(vn);
+	}
+
+	/**
 	 * @return The abstract value for the given pointer.
 	 */
 	public PtrDomain getPtrFacts(Varnode vn) {
-		return this.vars.get(vn).getPtrFacts();
+		return getFacts(vn).getPtrFacts();
 	}
 
 	/**
 	 * @return The abstract value for the given integer.
 	 */
 	public IntDomain getIntFacts(Varnode vn) {
-		return this.vars.get(vn).getIntFacts();
+		return getFacts(vn).getIntFacts();
 	}
 
 	@Override

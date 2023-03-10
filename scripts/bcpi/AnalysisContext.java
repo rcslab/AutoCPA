@@ -110,6 +110,18 @@ public class AnalysisContext {
 	}
 
 	/**
+	 * @return The given string as an address.
+	 */
+	public Address getAddress(String addr) {
+		return this.programs.stream()
+			.map(Program::getAddressFactory)
+			.map(af -> af.getAddress(addr))
+			.filter(Objects::nonNull)
+			.findAny()
+			.orElse(null);
+	}
+
+	/**
 	 * @return The function containing the given address, if any.
 	 */
 	public Function getFunctionContaining(Address addr) {

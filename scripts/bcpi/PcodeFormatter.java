@@ -1,5 +1,9 @@
 package bcpi;
 
+import bcpi.dataflow.BcpiDomain;
+import bcpi.dataflow.BcpiVarDomain;
+import bcpi.dataflow.DataFlow;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
@@ -9,11 +13,15 @@ import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
+import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
 
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,6 +38,8 @@ public class PcodeFormatter {
 	private final Function lowFunc;
 	private final Program program;
 	private final Listing listing;
+	private final BcpiDomain domain = BcpiDomain.bottom();
+	private final DataFlow<BcpiDomain> dataFlow = new DataFlow<>(this.domain);
 
 	public PcodeFormatter(AnalysisContext ctx, HighFunction highFunc) {
 		this.ctx = ctx;
@@ -169,6 +179,76 @@ public class PcodeFormatter {
 
 			this.highFunc.getPcodeOps(inst.getAddress())
 				.forEachRemaining(this::print);
+		}
+	}
+
+	/**
+	 * @return The data flow facts for a varnode.
+	 */
+	private BcpiVarDomain getFacts(Varnode vn) {
+		return this.dataFlow.fixpoint(vn).getFacts(vn);
+	}
+
+	/**
+	 * Pretty-print the data flow through an instruction.
+	 */
+	public void printDataFlow(Address addr) {
+		var ops = new ArrayList<PcodeOp>();
+		var seen = new HashSet<SequenceNumber>();
+
+		this.highFunc.getPcodeOps(addr).forEachRemaining(op -> {
+			ops.add(op);
+			seen.add(op.getSeqnum());
+		});
+
+		// Dependency-order the per-instruction pcode ops
+		var order = Comparator
+			.<PcodeOp>comparingInt(op -> op.getSeqnum().getOrder())
+			.reversed();
+		Collections.sort(ops, order);
+
+		for (int i = 0; i < ops.size(); ++i) {
+			var op = ops.get(i);
+			if (!this.domain.supports(op)) {
+				continue;
+			}
+
+			var inputs = new ArrayList<>(this.domain.getInputs(op));
+			Collections.reverse(inputs);
+			for (var input : inputs) {
+				if (seen.add(input.getSeqnum())) {
+					ops.add(input);
+				}
+			}
+		}
+
+		if (ops.isEmpty()) {
+			print(this.listing.getInstructionAt(addr));
+			Tty.print("    No pcode\n");
+			return;
+		}
+
+		Address lastAddr = null;
+		Collections.reverse(ops);
+		for (var op : ops) {
+			var opAddr = op.getSeqnum().getTarget();
+			if (!opAddr.equals(lastAddr)) {
+				print(this.listing.getInstructionAt(opAddr));
+				lastAddr = opAddr;
+			}
+
+			for (var input : op.getInputs()) {
+				Tty.print("    <i>// ");
+				print(input);
+				Tty.print(" = %s</i>\n", getFacts(input));
+			}
+
+			print(op);
+
+			var out = op.getOutput();
+			if (out != null) {
+				Tty.print("      = <b>%s</b>\n", getFacts(out));
+			}
 		}
 	}
 }
