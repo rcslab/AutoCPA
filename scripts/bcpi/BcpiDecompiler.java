@@ -46,7 +46,7 @@ public class BcpiDecompiler {
 	/**
 	 * Create a BcpiDecompiler for the given project.
 	 */
-	public BcpiDecompiler(Project project) {
+	BcpiDecompiler(Project project) {
 		this.diskCache = project.getProjectLocator().getProjectDir().toPath().resolve("decomp");
 	}
 

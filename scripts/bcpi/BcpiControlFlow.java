@@ -16,10 +16,10 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class BcpiControlFlow {
 	private final ConcurrentMap<Function, ControlFlowGraph> cfgs = new ConcurrentHashMap<>();
-	private final Linker linker;
+	private final AnalysisContext ctx;
 
-	public BcpiControlFlow(Linker linker) {
-		this.linker = linker;
+	public BcpiControlFlow(AnalysisContext ctx) {
+		this.ctx = ctx;
 	}
 
 	/**
@@ -50,6 +50,7 @@ public class BcpiControlFlow {
 	 * @return The set of functions reachable from the given entry points, up to a certain depth.
 	 */
 	public Set<Function> getCalledFunctions(Collection<Function> funcs, int maxDepth) {
+		var linker = this.ctx.getLinker();
 		Set<Function> result = new HashSet<>(funcs);
 
 		// Add called functions breadth-first

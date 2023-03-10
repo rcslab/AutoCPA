@@ -28,13 +28,11 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class FieldReferences {
 	private final ConcurrentMap<Address, Set<FieldReference>> refs = new ConcurrentHashMap<>();
-	private final Linker linker;
-	private final BcpiDecompiler decomp;
+	private final AnalysisContext ctx;
 	private final BcpiControlFlow cfgs;
 
-	public FieldReferences(Linker linker, BcpiDecompiler decomp, BcpiControlFlow cfgs) {
-		this.linker = linker;
-		this.decomp = decomp;
+	public FieldReferences(AnalysisContext ctx, BcpiControlFlow cfgs) {
+		this.ctx = ctx;
 		this.cfgs = cfgs;
 	}
 
@@ -42,7 +40,7 @@ public class FieldReferences {
 	 * @return A new FieldReferences instance for nested function calls.
 	 */
 	private FieldReferences nested() {
-		return new FieldReferences(this.linker, this.decomp, this.cfgs);
+		return new FieldReferences(this.ctx, this.cfgs);
 	}
 
 	/**
@@ -69,7 +67,7 @@ public class FieldReferences {
 
 		functions
 			.parallelStream()
-			.map(f -> this.decomp.decompile(f))
+			.map(f -> this.ctx.getDecompiler().decompile(f))
 			.filter(f -> f != null)
 			.forEach(f -> computeDataFlow(BcpiConfig.IPA_DEPTH, f));
 	}
@@ -119,15 +117,16 @@ public class FieldReferences {
 		Varnode[] inputs = op.getInputs();
 		Varnode target = inputs[0];
 
+		var linker = this.ctx.getLinker();
 		FunctionManager funcs = highFunc.getFunction().getProgram().getFunctionManager();
 		Function targetFunc = Optional.ofNullable(funcs.getFunctionAt(target.getAddress()))
-			.flatMap(this.linker::resolve)
+			.flatMap(linker::resolve)
 			.orElse(null);
 		if (targetFunc == null) {
 			return;
 		}
 
-		HighFunction highTarget = this.decomp.decompile(targetFunc);
+		HighFunction highTarget = this.ctx.getDecompiler().decompile(targetFunc);
 		if (highTarget == null) {
 			return;
 		}
