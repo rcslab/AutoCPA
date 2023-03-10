@@ -4,13 +4,19 @@ import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.DomainObject;
 import ghidra.framework.model.Project;
+import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionManager;
+import ghidra.program.model.symbol.Symbol;
 import ghidra.util.task.TaskMonitor;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * An analysis context manages one or more programs that are linked together.
@@ -89,5 +95,41 @@ public class AnalysisContext {
 	 */
 	public Linker getLinker() {
 		return this.linker;
+	}
+
+	/**
+	 * @return All the functions with the given name.
+	 */
+	public Collection<Function> getFunctionsNamed(String name) {
+		return this.programs.stream()
+			.map(Program::getFunctionManager)
+			.map(fm -> fm.getFunctions(true))
+			.<Function>mapMulti((funcs, stream) -> funcs.forEach(stream::accept))
+			.filter(f -> f.getName().equals(name))
+			.collect(Collectors.toList());
+	}
+
+	/**
+	 * @return The function containing the given address, if any.
+	 */
+	public Function getFunctionContaining(Address addr) {
+		return this.programs.stream()
+			.map(Program::getListing)
+			.map(l -> l.getFunctionContaining(addr))
+			.filter(Objects::nonNull)
+			.findAny()
+			.orElse(null);
+	}
+
+	/**
+	 * @return The symbol at the given address, if any.
+	 */
+	public Symbol getSymbol(Address addr) {
+		return this.programs.stream()
+			.map(Program::getSymbolTable)
+			.map(t -> t.getPrimarySymbol(addr))
+			.filter(Objects::nonNull)
+			.findAny()
+			.orElse(null);
 	}
 }
