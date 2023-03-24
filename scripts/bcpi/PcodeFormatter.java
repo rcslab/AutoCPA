@@ -5,6 +5,7 @@ import bcpi.dataflow.BcpiVarDomain;
 import bcpi.dataflow.DataFlow;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Listing;
@@ -81,6 +82,7 @@ public class PcodeFormatter {
 			var highName = Optional.of(k)
 				.map(Varnode::getHigh)
 				.map(HighVariable::getName)
+				.filter(n -> !n.equals("UNNAMED"))
 				.orElse("var");
 			varCounts.add(highName);
 			return highName + "." + varCounts.count(highName);
@@ -123,6 +125,17 @@ public class PcodeFormatter {
 	}
 
 	/**
+	 * Pretty print a name with a type.
+	 */
+	private void printTyped(DataType type, String name) {
+		var spec = new StringBuilder();
+		var prefix = new StringBuilder();
+		var suffix = new StringBuilder();
+		DataTypes.formatCDecl(type, spec, prefix, suffix);
+		Tty.print("<fg=red>%s %s</fg><fg=blue>%s</fg><fg=red>%s</fg>", spec, prefix, name, suffix);
+	}
+
+	/**
 	 * Pretty-print a varnode with its type, if known.
 	 */
 	private void printTyped(Varnode vn) {
@@ -130,10 +143,7 @@ public class PcodeFormatter {
 			.map(Varnode::getHigh)
 			.map(HighVariable::getDataType);
 		if (type.isPresent()) {
-			var spec = new StringBuilder();
-			var decl = new StringBuilder();
-			DataTypes.formatCDecl(type.get(), getName(vn), spec, decl);
-			Tty.print("<fg=red>%s</fg> <fg=blue>%s</fg>", spec, decl);
+			printTyped(type.get(), getName(vn));
 		} else {
 			print(vn);
 		}
@@ -167,12 +177,35 @@ public class PcodeFormatter {
 	}
 
 	/**
+	 * Pretty-print the function's signature.
+	 */
+	private void printSignature() {
+		var addr = this.lowFunc.getEntryPoint();
+		Tty.print("<fg=yellow>%s</fg> ", addr);
+
+		var type = this.lowFunc.getReturnType();
+		var name = this.lowFunc.getName();
+		printTyped(type, name);
+
+		Tty.print("(");
+		var locals = this.highFunc.getLocalSymbolMap();
+		for (int i = 0; i < locals.getNumParams(); ++i) {
+			if (i > 0) {
+				Tty.print(", ");
+			}
+			var param = locals.getParam(i);
+			if (param != null) {
+				printTyped(param.getRepresentative());
+			}
+		}
+		Tty.print(")\n\n");
+	}
+
+	/**
 	 * Pretty-print an entire function.
 	 */
 	public void print() {
-		var funcAddr = this.lowFunc.getEntryPoint();
-		var funcName = this.lowFunc.getName();
-		Tty.print("<fg=yellow>%s</fg> <<fg=blue>%s</fg>>:\n\n", funcAddr, funcName);
+		printSignature();
 
 		for (var inst : this.listing.getInstructions(this.lowFunc.getBody(), true)) {
 			print(inst);
@@ -193,6 +226,8 @@ public class PcodeFormatter {
 	 * Pretty-print the data flow through an instruction.
 	 */
 	public void printDataFlow(Address addr) {
+		printSignature();
+
 		var ops = new ArrayList<PcodeOp>();
 		var seen = new HashSet<SequenceNumber>();
 
