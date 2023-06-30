@@ -203,7 +203,8 @@ public class DataTypes {
 			try {
 				struct.insertBitFieldAt(byteOffset, byteWidth, bitOffset, baseType, bitSize, field.getFieldName(), field.getComment());
 			} catch (Exception e) {
-				throw Throwables.propagate(e);
+				Throwables.throwIfUnchecked(e);
+				throw new RuntimeException(e);
 			}
 		} else {
 			int offset = 0;

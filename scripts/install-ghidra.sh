@@ -41,8 +41,20 @@ if [ "$OS" = freebsd ]; then
     CXX="$CXX -I/usr/local/include"
 fi
 
-gmake -C Ghidra/Features/Decompiler/src/decompile/cpp -j$(sysctl -n hw.ncpu) ghidra_opt CC="$CC" CXX="$CXX"
-gmake -C Ghidra/Features/Decompiler/src/decompile/cpp -j$(sysctl -n hw.ncpu) sleigh_opt CC="$CC" CXX="$CXX"
+if command -v gmake >/dev/null; then
+    MAKE=gmake
+else
+    MAKE=make
+fi
+
+if command -v nproc >/dev/null; then
+    MAKE="$MAKE -j$(nproc)"
+elif [ "$OS" = freebsd ]; then
+    MAKE="$MAKE -j$(sysctl -n hw.ncpu)"
+fi
+
+$MAKE -C Ghidra/Features/Decompiler/src/decompile/cpp ghidra_opt CC="$CC" CXX="$CXX"
+$MAKE -C Ghidra/Features/Decompiler/src/decompile/cpp sleigh_opt CC="$CC" CXX="$CXX"
 
 OUT=Ghidra/Features/Decompiler/os/"${OS}_${ARCH}"
 mkdir -p "$OUT"

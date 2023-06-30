@@ -16,7 +16,6 @@
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.util.bin.format.dwarf4.next.*;
-import ghidra.program.model.data.BuiltInDataTypeManager;
 
 /**
  * Based on Ghidra's DWARF_ExtractorScript, with custom options.
@@ -29,8 +28,7 @@ public class BcpiDwarf extends GhidraScript {
 		importOptions.setPreloadAllDIEs(true);
 		importOptions.setImportLimitDIECount(Integer.MAX_VALUE);
 		try (DWARFProgram dwarfProg = new DWARFProgram(currentProgram, importOptions, monitor)) {
-			BuiltInDataTypeManager dtms = BuiltInDataTypeManager.getDataTypeManager();
-			DWARFParser dp = new DWARFParser(dwarfProg, dtms, monitor);
+			DWARFParser dp = new DWARFParser(dwarfProg, monitor);
 			DWARFImportSummary importSummary = dp.parse();
 			importSummary.logSummaryResults();
 		}

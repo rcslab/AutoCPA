@@ -587,7 +587,8 @@ public class StructOrderAnalysis extends GhidraScript {
 
 			out.println("</html>");
 		} catch (Exception e) {
-			throw Throwables.propagate(e);
+			Throwables.throwIfUnchecked(e);
+			throw new RuntimeException(e);
 		}
 	}
 

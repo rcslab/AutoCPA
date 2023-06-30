@@ -3,8 +3,8 @@
 set -eu
 
 GHIDRA="$ROOT/ghidra"
-GHIDRA_VERSION=ghidra_10.2.1_PUBLIC
-GHIDRA_DATE=20221110
+GHIDRA_VERSION=ghidra_10.3.1_PUBLIC
+GHIDRA_DATE=20230614
 GHIDRA_ROOT=${GHIDRA_ROOT:-"$GHIDRA/$GHIDRA_VERSION"}
 GHIDRA_PROJECTS=${GHIDRA_PROJECTS:-"$GHIDRA/projects"}
 
@@ -27,6 +27,5 @@ ghidra_headless() {
 
     mkdir -p "$GHIDRA_PROJECTS"
 
-    # Ghidra's launch.sh uses eval, so quote the parameters with Bash's printf %q
-    "$GHIDRA_ROOT/support/launch.sh" "$LAUNCH_MODE" jdk Ghidra-Headless "$MAXMEM" "$VMARG_LIST" ghidra.app.util.headless.AnalyzeHeadless "$GHIDRA_PROJECTS" $(bash -c 'printf "%q " "$@"' bash "$@")
+    "$GHIDRA_ROOT/support/launch.sh" "$LAUNCH_MODE" jdk Ghidra-Headless "$MAXMEM" "$VMARG_LIST" ghidra.app.util.headless.AnalyzeHeadless "$GHIDRA_PROJECTS" "$@"
 }

@@ -8,9 +8,11 @@ import ghidra.framework.model.Project;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.DecoderException;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PackedDecode;
 import ghidra.program.model.pcode.PcodeDataTypeManager;
+import ghidra.program.model.symbol.IdentityNameTransformer;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
@@ -112,11 +114,12 @@ public class BcpiDecompiler {
 
 			var lang = program.getLanguage();
 			var cspec = program.getCompilerSpec();
-			var dtManager = new PcodeDataTypeManager(program);
+			var dtManager = new PcodeDataTypeManager(program, new IdentityNameTransformer());
 			var results = new DecompileResults(func, lang, cspec, dtManager, "", decoder, DecompileProcess.DisposeState.NOT_DISPOSED);
 			return results.getHighFunction();
 		} catch (Exception e) {
-			throw Throwables.propagate(e);
+			Throwables.throwIfUnchecked(e);
+			throw new RuntimeException(e);
 		}
 	}
 
@@ -204,46 +207,40 @@ public class BcpiDecompiler {
 		@Override
 		public void ingestStream(InputStream stream) throws IOException {
 			// Ingest bytes from the stream up to (and including) the first 0 byte.
-			int size = buffer.size();
+			var chunk = new ByteArrayOutputStream();
 			while (true) {
 				int b = stream.read();
 				if (b < 0) {
 					break;
 				}
 
-				buffer.write(b);
+				chunk.write(b);
 				if (b == 0) {
 					break;
 				}
 			}
+			chunk.writeTo(this.buffer);
+
+			super.ingestStream(new ByteArrayInputStream(chunk.toByteArray()));
 		}
 
 		@Override
 		public void endIngest() {
 			try {
-				var buffer = this.buffer.toByteArray();
-
 				// Cache the response to disk
 				var dir = this.path.getParent();
 				Files.createDirectories(dir);
 				var tmp = Files.createTempFile(dir, null, null);
-				Files.write(tmp, buffer);
+				try (var out = Files.newOutputStream(tmp)) {
+					this.buffer.writeTo(out);
+				}
 				Files.move(tmp, this.path, StandardCopyOption.REPLACE_EXISTING);
 
-				// Copy the response to the underlying decoder
-				var stream = new ByteArrayInputStream(buffer);
-				while (stream.available() > 0) {
-					super.ingestStream(stream);
-				}
 				super.endIngest();
 			} catch (Exception e) {
-				throw Throwables.propagate(e);
+				Throwables.throwIfUnchecked(e);
+				throw new RuntimeException(e);
 			}
-		}
-
-		@Override
-		public boolean isEmpty() {
-			return this.buffer.size() == 0;
 		}
 	}
 }

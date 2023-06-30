@@ -118,7 +118,8 @@ public class ControlFlowGraph {
 			this.domTree = GraphAlgorithms.findDominanceTree(this.cfg, TaskMonitor.DUMMY);
 			this.postDomTree = GraphAlgorithms.findDominanceTree(this.reverseCfg, TaskMonitor.DUMMY);
 		} catch (Exception e) {
-			throw Throwables.propagate(e);
+			Throwables.throwIfUnchecked(e);
+			throw new RuntimeException(e);
 		}
 	}
 
@@ -173,7 +174,8 @@ public class ControlFlowGraph {
 				this.coverage.add(new CodeBlockVertex(block), count);
 			}
 		} catch (Exception e) {
-			throw Throwables.propagate(e);
+			Throwables.throwIfUnchecked(e);
+			throw new RuntimeException(e);
 		}
 	}
 
@@ -259,7 +261,8 @@ public class ControlFlowGraph {
 				containing.add(new CodeBlockVertex(block));
 			}
 		} catch (Exception e) {
-			throw Throwables.propagate(e);
+			Throwables.throwIfUnchecked(e);
+			throw new RuntimeException(e);
 		}
 
 		// Get definitely reached blocks
