@@ -41,14 +41,46 @@ public class DataTypes {
 		return type.getDataTypePath().equals(other.getDataTypePath());
 	}
 
+	private static DataType fix(DataType type) {
+		if (!(type instanceof Structure)) {
+			return type;
+		}
+
+		// Ghidra has a bug that occasionally causes struct fields to
+		// have size 1 instead of their proper size.  Rebuild each
+		// structure to avoid this mysterious interior padding.
+		var struct = (Structure) type;
+		var copy = emptyStructLike(struct);
+		for (var field : struct.getDefinedComponents()) {
+			var offset = field.getOffset();
+			var fieldType = field.getDataType();
+			var size = fieldType.getLength(); // *not* field.getLength()
+			var name = field.getFieldName();
+			var comment = field.getComment();
+			if (field.isBitFieldComponent()) {
+				var bitField = (BitFieldDataType) fieldType;
+				var bitOffset = bitField.getBitOffset();
+				var baseType = bitField.getBaseDataType();
+				var bitSize = bitField.getBitSize();
+				try {
+					copy.insertBitFieldAt(offset, size, bitOffset, baseType, bitSize, name, comment);
+				} catch (Exception e) {
+					throw Throwables.propagate(e);
+				}
+			} else {
+				copy.insertAtOffset(offset, fieldType, size, name, comment);
+			}
+		}
+		padTail(copy, getAlignment(struct));
+
+		return copy;
+	}
+
 	/**
 	 * Deduplicate a DataType.
 	 */
 	public static DataType dedup(DataType type) {
-		DataType result = dedupMap.putIfAbsent(type.getDataTypePath(), type);
-		if (result == null) {
-			result = type;
-		}
+		DataType result = dedupMap.computeIfAbsent(type.getDataTypePath(), k -> fix(type));
 
 		if (result != type) {
 			if (dedupSeen.add(Equivalence.identity().wrap(type))) {
@@ -187,7 +219,7 @@ public class DataTypes {
 				offset += align - delta;
 			}
 
-			struct.insertAtOffset(offset, type, field.getLength(), field.getFieldName(), field.getComment());
+			struct.insertAtOffset(offset, type, type.getLength(), field.getFieldName(), field.getComment());
 		}
 	}
 
