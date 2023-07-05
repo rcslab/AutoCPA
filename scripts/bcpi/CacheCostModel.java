@@ -81,7 +81,9 @@ public class CacheCostModel implements CostModel<Structure> {
 		// Compute the expected cost over the possible cache line offsets
 		long total = 0;
 		int weightShift = nOffsets;
-		for (int offset = 0; offset < CACHE_LINE; offset += this.align) {
+		for (int i = 0; i < nOffsets; ++i) {
+			int offset = i * this.align;
+
 			// For each offset, the cost is the cumulative number of cache lines touched
 			// up to the current pattern, weighted by the pattern's observation count.
 			// You can think of this like the area under the (pattern, cache lines) curve.
@@ -93,9 +95,9 @@ public class CacheCostModel implements CostModel<Structure> {
 
 				pattern.getBytes()
 					.stream()
-					.map(i -> bytePerm[i])
-					.filter(i -> i >= 0)
-					.forEach(i -> touchedLines.set(i / CACHE_LINE));
+					.map(j -> bytePerm[j])
+					.filter(j -> j >= 0)
+					.forEach(j -> touchedLines.set((offset + j) / CACHE_LINE));
 
 				cost += count * touchedLines.cardinality();
 
