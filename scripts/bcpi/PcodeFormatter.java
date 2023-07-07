@@ -158,7 +158,7 @@ public class PcodeFormatter {
 		var out = op.getOutput();
 		if (out != null) {
 			printTyped(out);
-			Tty.print("\n      = ");
+			Tty.print(" = ");
 		}
 
 		Tty.print("<b><fg=green>%s</fg></b>(", op.getMnemonic());
@@ -244,10 +244,6 @@ public class PcodeFormatter {
 
 		for (int i = 0; i < ops.size(); ++i) {
 			var op = ops.get(i);
-			if (!this.domain.supports(op)) {
-				continue;
-			}
-
 			var inputs = new ArrayList<>(this.domain.getInputs(op));
 			Collections.reverse(inputs);
 			for (var input : inputs) {
@@ -272,15 +268,27 @@ public class PcodeFormatter {
 				lastAddr = opAddr;
 			}
 
-			for (var input : op.getInputs()) {
-				Tty.print("    <i>// ");
-				print(input);
-				Tty.print(" = %s</i>\n", getFacts(input));
-			}
-
-			print(op);
+			Tty.print("      ");
 
 			var out = op.getOutput();
+			if (out != null) {
+				printTyped(out);
+				Tty.print(" = ");
+			}
+
+			Tty.print("<b><fg=green>%s</fg></b>(", op.getMnemonic());
+			var inputs = op.getInputs();
+			if (inputs.length > 0) {
+				Tty.print("\n");
+				for (var input : inputs) {
+					Tty.print("        ");
+					print(input);
+					Tty.print(" = <i>%s</i>,\n", getFacts(input));
+				}
+				Tty.print("      ");
+			}
+			Tty.print(")\n");
+
 			if (out != null) {
 				Tty.print("      = <b>%s</b>\n", getFacts(out));
 			}
