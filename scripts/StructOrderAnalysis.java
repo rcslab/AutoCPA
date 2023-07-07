@@ -1,9 +1,9 @@
 import bcpi.AccessPattern;
 import bcpi.AccessPatterns;
+import bcpi.BcpiAnalysis;
 import bcpi.BcpiConfig;
 import bcpi.BcpiControlFlow;
 import bcpi.BcpiData;
-import bcpi.BcpiDecompiler;
 import bcpi.CacheCostModel;
 import bcpi.DataTypes;
 import bcpi.Field;
@@ -38,6 +38,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -221,17 +222,16 @@ class FixedFieldConstraint implements ConstraintArg {
 /**
  * Analyzes cache misses to suggest reorderings of struct fields.
  */
-public class StructOrderAnalysis extends GhidraScript {
+public class StructOrderAnalysis extends BcpiAnalysis {
 	private ListMultimap<String, ConstraintArg> constraints = ArrayListMultimap.create();
 
 	@Override
-	public void run() throws Exception {
-		List<Program> programs = getAllPrograms();
+	protected void analyze(String[] args) throws Exception {
+		var ctx = getContext();
 
 		// Read address_info.csv to find relevant addresses
-		String[] args = getScriptArgs();
 		Path csv = Paths.get(args[0]);
-		BcpiData data = BcpiData.parse(csv, programs);
+		BcpiData data = BcpiData.parse(csv, ctx);
 
 		// Process command line arguments
 		for (int i = 1; i < args.length; ++i) {
@@ -255,15 +255,12 @@ public class StructOrderAnalysis extends GhidraScript {
 		// Get the decompilation of each function containing an address
 		// for which we have data.  This is much faster than calling
 		// DataTypeReferenceFinder once per field.
-		Linker linker = new Linker(programs);
 		Set<Function> funcs = data.getFunctions();
 
-		BcpiControlFlow cfgs = new BcpiControlFlow(linker);
+		BcpiControlFlow cfgs = new BcpiControlFlow(ctx);
 		cfgs.addCoverage(data);
 
-		BcpiDecompiler decomp = new BcpiDecompiler(getState().getProject());
-
-		FieldReferences refs = new FieldReferences(linker, decomp, cfgs);
+		FieldReferences refs = new FieldReferences(ctx, cfgs);
 		refs.collect(funcs);
 
 		// Use our collected data to infer field access patterns
@@ -275,27 +272,6 @@ public class StructOrderAnalysis extends GhidraScript {
 		String name = getState().getProject().getName();
 		Path results = Paths.get("./results").resolve(name);
 		render(patterns, results);
-	}
-
-	private List<Program> getAllPrograms() throws Exception {
-		List<Program> programs = new ArrayList<>();
-		getAllPrograms(getProjectRootFolder(), programs);
-		return programs;
-	}
-
-	private void getAllPrograms(DomainFolder folder, List<Program> programs) throws Exception {
-		for (DomainFile file : folder.getFiles()) {
-			DomainObject object = file.getImmutableDomainObject(this, DomainFile.DEFAULT_VERSION, this.monitor);
-			if (object instanceof Program) {
-				programs.add((Program) object);
-			} else {
-				object.release(this);
-			}
-		}
-
-		for (DomainFolder subFolder : folder.getFolders()) {
-			getAllPrograms(subFolder, programs);
-		}
 	}
 
 	/**

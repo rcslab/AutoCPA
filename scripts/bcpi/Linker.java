@@ -17,19 +17,12 @@ import java.util.concurrent.ConcurrentMap;
  * "Dynamic linker" for external functions.
  */
 public class Linker {
-	private final List<Program> programs;
+	private final Collection<Program> programs;
 	private final ConcurrentMap<String, Optional<Function>> cache;
 
-	public Linker(Collection<Program> programs) {
-		this.programs = ImmutableList.copyOf(programs);
+	Linker(Collection<Program> programs) {
+		this.programs = programs;
 		this.cache = new ConcurrentHashMap<>();
-	}
-
-	/**
-	 * @return The programs known to this linker.
-	 */
-	public List<Program> getPrograms() {
-		return this.programs;
 	}
 
 	/**

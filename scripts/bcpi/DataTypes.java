@@ -288,38 +288,46 @@ public class DataTypes {
 	 * Format a C declaration into a separate specifier and declarator.
 	 */
 	public static void formatCDecl(DataType type, String name, StringBuilder specifier, StringBuilder declarator) {
-		declarator.append(name);
+		var prefix = new StringBuilder();
+		var suffix = new StringBuilder();
+		formatCDecl(type, specifier, prefix, suffix);
 
+		declarator.append(prefix)
+			.append(name)
+			.append(suffix);
+	}
+
+	/**
+	 * Format a C declaration into a separate specifier and declarator prefix/suffix.
+	 */
+	public static void formatCDecl(DataType type, StringBuilder specifier, StringBuilder prefix, StringBuilder suffix) {
 		while (true) {
 			if (type instanceof Array) {
 				Array array = (Array) type;
 				type = array.getDataType();
-				declarator
-					.append("[")
+				suffix.append("[")
 					.append(array.getNumElements())
 					.append("]");
 			} else if (type instanceof BitFieldDataType) {
 				BitFieldDataType bitField = (BitFieldDataType) type;
 				type = bitField.getBaseDataType();
-				declarator
-					.append(" : ")
+				suffix.append(" : ")
 					.append(bitField.getDeclaredBitSize());
 			} else if (type instanceof FunctionDefinition) {
 				FunctionDefinition func = (FunctionDefinition) type;
 				type = func.getReturnType();
 
-				declarator.append(Arrays.stream(func.getArguments())
+				suffix.append(Arrays.stream(func.getArguments())
 					.map(p -> formatCDecl(p.getDataType()))
 					.collect(Collectors.joining(", ", "(", ")")));
 			} else if (type instanceof Pointer) {
 				type = ((Pointer) type).getDataType();
 
 				if (type instanceof Array || type instanceof FunctionDefinition) {
-					declarator
-						.insert(0, "(*")
-						.append(")");
+					prefix.insert(0, "(*");
+					suffix.append(")");
 				} else {
-					declarator.insert(0, "*");
+					prefix.insert(0, "*");
 				}
 			} else {
 				break;
@@ -357,9 +365,8 @@ public class DataTypes {
 			}
 		} else if (typeName.startsWith("anon_subr_")) {
 			specifier.append("...");
-			declarator
-				.insert(0, "(*")
-				.append(")(...)");
+			prefix.insert(0, "(*");
+			suffix.append(")(...)");
 		} else {
 			specifier.append(typeName);
 		}
