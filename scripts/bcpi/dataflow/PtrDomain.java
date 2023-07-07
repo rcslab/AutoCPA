@@ -83,8 +83,7 @@ public class PtrDomain implements SparseDomain<PtrDomain, BcpiVarDomain> {
 			return OptionalInt.empty();
 		}
 
-		var length = IntDomain.constant(type.getLength());
-		var wrapped = this.offset.mod(length);
+		var wrapped = this.offset.mod(type.getLength());
 		var offset = wrapped.getIfConstant();
 		if (!offset.isPresent()) {
 			return OptionalInt.empty();
