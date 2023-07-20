@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 import csv
+from elftools.elf.elffile import ELFFile
 import os
 import sys
 
@@ -11,11 +12,22 @@ from Core import *
 
 
 DSO = None
+ELF = None
 COUNTS = defaultdict(Counter)
+
+def map_ip(ip):
+    for seg in ELF.iter_segments("PT_LOAD"):
+        start = seg["p_offset"]
+        end = start + seg["p_filesz"]
+        if ip >= start and ip < end:
+            return ip - start + seg["p_vaddr"]
 
 def trace_begin():
     global DSO
-    DSO = sys.argv[1]
+    DSO = os.path.abspath(sys.argv[1])
+
+    global ELF
+    ELF = ELFFile(open(DSO, "rb"))
 
 def trace_end():
     writer = csv.writer(sys.stdout)
@@ -38,4 +50,6 @@ def process_event(event):
         return
 
     ip = frame["sym"]["start"] + frame["sym_off"]
-    COUNTS[ip][name] += 1
+    ip = map_ip(ip)
+    if ip is not None:
+        COUNTS[ip][name] += 1
