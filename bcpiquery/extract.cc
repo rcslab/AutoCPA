@@ -58,7 +58,7 @@ check_recurse_condition(
 		return (false);
 	}
 
-	if (cur_level > u.max_depth) {
+	if ((size_t)cur_level > u.max_depth) {
 		printf("(......)\n");
 		return (false);
 	}
@@ -90,7 +90,7 @@ util_traverse(const util_query_parameter &u, int cur_level, bcpi_node *n)
 	std::vector<bcpi_edge *> edges;
 	bcpi_collect_edge(n, edges);
 	bcpi_edge_sort(u.counter_index, edges);
-	int traverse_node;
+	size_t traverse_node;
 
 	traverse_node = std::min(edges.size(), u.top_n_edge);
 
@@ -167,7 +167,7 @@ util_process(util_query_parameter &u)
 	// call node merge here
 	nodes = vec2hash_merge_nodes(u.counter_index, nodes);
 	bcpi_node_sort(u.counter_index, nodes);
-	int traverse_node;
+	size_t traverse_node;
 
 	FILE *f = fopen(outfile.c_str(), "w");
 	if (!f) {
@@ -205,7 +205,7 @@ util_process(util_query_parameter &u)
 		if (verbose)
 			bcpi_show_node_info(&records[0], n, u.counter_name);
 	}
-	printf("Found %d nodes\n", traverse_node);
+	printf("Found %lu nodes\n", traverse_node);
 
 	if (fclose(f)) {
 		perror("fclose");
@@ -260,7 +260,7 @@ util_process_all(util_query_parameter &u)
 	// call node merge here
 	nodes = vec2hash_merge_nodes(nodes);
 	bcpi_node_sort(nodes);
-	int traverse_node;
+	size_t traverse_node;
 
 	FILE *f = fopen(outfile.c_str(), "w");
 	if (!f) {
@@ -274,7 +274,7 @@ util_process_all(util_query_parameter &u)
 		bool hascount = false;
 		bcpi_node *n = nodes[i];
 
-		for (int c = 0; c < records[0].counters.size(); c++) {
+		for (unsigned int c = 0; c < records[0].counters.size(); c++) {
 			if (n->terminal_counters[c])
 				hascount = true;
 		}
@@ -286,7 +286,7 @@ util_process_all(util_query_parameter &u)
 		// Print CSV formatted samples per address
 		fprintf(f, "%lx,",
 		    get_revised_addr(n->object->path, n->node_address));
-		for (int c = 0; c < records[0].counters.size(); c++) {
+		for (unsigned int c = 0; c < records[0].counters.size(); c++) {
 			if (n->terminal_counters[c])
 				fprintf(f, "%s=%ld,",
 				    records[0].counters[c].c_str(),
@@ -304,7 +304,7 @@ util_process_all(util_query_parameter &u)
 		}
 		fprintf(f, "\n");
 	}
-	printf("Found %d nodes\n", traverse_node);
+	printf("Found %lu nodes\n", traverse_node);
 
 	if (fclose(f)) {
 		perror("fclose");

@@ -103,7 +103,8 @@ util_process(util_query_parameter &u)
 			std::string func = lookup_function(
 			    n->object->path, n->node_address);
 
-			for (int c = 0; c < record.counters.size(); c++) {
+			for (unsigned int c = 0; c < record.counters.size();
+			     c++) {
 				uint64_t value = n->terminal_counters[c];
 				samples[func].add(record.counters[c], value);
 			}
@@ -133,7 +134,7 @@ util_process(util_query_parameter &u)
 		printf("-");
 	for (auto &c : all_counters) {
 		printf("-+-");
-		for (int i = 0; i < c.size(); i++)
+		for (unsigned int i = 0; i < c.size(); i++)
 			printf("-");
 	}
 	printf("-+\n");

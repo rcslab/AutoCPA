@@ -473,12 +473,12 @@ bcpid_event_handler_mapin(bcpid *b, const struct pmclog_ev *ev)
 }
 
 static void
-bcpid_event_handler_mapout(bcpid *b, const struct pmclog_ev *ev)
+bcpid_event_handler_mapout(bcpid *b __unused, const struct pmclog_ev *ev)
 {
 	const struct pmclog_ev_map_out *mo = &ev->pl_u.pl_mo;
-	pid_t pid = mo->pl_pid;
-	uintfptr_t start = mo->pl_start;
-	uintfptr_t end = mo->pl_end;
+	pid_t pid __unused = mo->pl_pid;
+	uintfptr_t start __unused = mo->pl_start;
+	uintfptr_t end __unused = mo->pl_end;
 }
 
 /*
@@ -848,7 +848,7 @@ bcpid_init_proc(bcpid *b, int pid)
 	exec->pid = pid;
 
 	struct kinfo_vmentry *cur_vm = vm;
-	for (int i = 0; i < count; ++i, ++cur_vm) {
+	for (unsigned int i = 0; i < count; ++i, ++cur_vm) {
 		if (cur_vm->kve_start > BCPID_KERN_BASE) {
 			break;
 		}
@@ -1035,12 +1035,14 @@ bcpid_event_handler_proc_exec(bcpid *b, const struct pmclog_ev *ev)
 }
 
 static void
-bcpid_event_handler_proc_fork(bcpid *b, const struct pmclog_ev *ev)
+bcpid_event_handler_proc_fork(bcpid *b __unused,
+    const struct pmclog_ev *ev __unused)
 {
 }
 
 static void
-bcpid_event_handler_proc_create(bcpid *b, const struct pmclog_ev *ev)
+bcpid_event_handler_proc_create(bcpid *b __unused,
+    const struct pmclog_ev *ev __unused)
 {
 }
 
@@ -1114,7 +1116,7 @@ bcpid_kevent_set(bcpid *b, uintptr_t ident, short filter, u_short flags,
 }
 
 static void
-bcpid_pmc_init(bcpid *b)
+bcpid_pmc_init(bcpid *b __unused)
 {
 	int status;
 
@@ -1609,7 +1611,7 @@ static void
 bcpid_handle_timer(bcpid *b)
 {
 	static uint64_t timer_counter = 0;
-	static rusage r_old = { { 0, 0 } };
+	static rusage r_old;
 	struct rusage r;
 	int status;
 	uint64_t new_time, old_time, time_diff;
@@ -1776,7 +1778,7 @@ bcpid_print_pmcs()
 	fprintf(stderr, "CPU Type: %s, CPUs: %d, PMCs: %d, Classes: %d\n",
 	    pmc_name_of_cputype(cpuinfo->pm_cputype), cpuinfo->pm_ncpu,
 	    cpuinfo->pm_npmc, cpuinfo->pm_nclass);
-	for (int i = 0; i < cpuinfo->pm_nclass; i++) {
+	for (unsigned int i = 0; i < cpuinfo->pm_nclass; i++) {
 		const struct pmc_classinfo *c = &cpuinfo->pm_classes[i];
 		fprintf(stderr, "Class %d %s: Width: %d, PMCS: %d, Caps: ", i,
 		    pmc_name_of_class(c->pm_class), c->pm_width, c->pm_num);

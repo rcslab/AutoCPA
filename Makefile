@@ -1,12 +1,15 @@
 SUBDIR = libbcpi bcpid bcpiquery
 
-CXXFLAGS=-std=c++20 -Wall
+.ifdef WITH_DEBUG
+CXXFLAGS = -Og -DBCPID_DEBUG
+.else
+CXXFLAGS = -O3
+.endif
+
+CXXFLAGS += -g -std=c++20 -Wall -Wextra -Werror -Wno-missing-field-initializers
 
 .dinclude "Makefile.local"
 
-.ifdef WITH_DEBUG
-CXXFLAGS += -O0 -DBCPID_DEBUG -g
-.endif
 
 .ifdef WITH_ASAN
 CXXFLAGS += -fsanitize=address

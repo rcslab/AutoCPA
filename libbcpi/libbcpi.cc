@@ -1,3 +1,4 @@
+#include <sys/cdefs.h>
 #include <sys/utsname.h>
 
 #include <assert.h>
@@ -421,14 +422,14 @@ bcpi_is_equal(const bcpi_record &a, const bcpi_record &b)
 		BCPI_IS_EQUAL_FAIL("system_name");
 	}
 	BCPI_CHECK_EQUAL(a.counters.size(), b.counters.size());
-	for (int i = 0; i < a.counters.size(); ++i) {
+	for (unsigned int i = 0; i < a.counters.size(); ++i) {
 		if (a.counters[i] != b.counters[i]) {
 			BCPI_IS_EQUAL_FAIL("counters");
 		}
 	}
 
 	BCPI_CHECK_EQUAL(a.objects.size(), b.objects.size());
-	for (int i = 0; i < a.objects.size(); ++i) {
+	for (unsigned int i = 0; i < a.objects.size(); ++i) {
 		const bcpi_object &roa = a.objects[i];
 		const bcpi_object &rob = b.objects[i];
 
@@ -444,7 +445,7 @@ bcpi_is_equal(const bcpi_record &a, const bcpi_record &b)
 			BCPI_IS_EQUAL_FAIL("hash");
 		}
 
-		for (int j = 0; j < roa.functions.size(); ++j) {
+		for (unsigned int j = 0; j < roa.functions.size(); ++j) {
 			const bcpi_function &fa = roa.functions[j];
 			const bcpi_function &fb = roa.functions[j];
 
@@ -456,7 +457,7 @@ bcpi_is_equal(const bcpi_record &a, const bcpi_record &b)
 			}
 		}
 
-		for (int j = 0; j < roa.nodes.size(); ++j) {
+		for (unsigned int j = 0; j < roa.nodes.size(); ++j) {
 			const bcpi_node &rna = roa.nodes[j];
 			const bcpi_node &rnb = rob.nodes[j];
 
@@ -464,12 +465,12 @@ bcpi_is_equal(const bcpi_record &a, const bcpi_record &b)
 			BCPI_CHECK_EQUAL(rna.node_address, rnb.node_address);
 			BCPI_CHECK_EQUAL(rna.node_index, rnb.node_index);
 
-			for (int k = 0; k < a.counters.size(); ++k) {
+			for (unsigned int k = 0; k < a.counters.size(); ++k) {
 				BCPI_CHECK_EQUAL(rna.terminal_counters[k],
 				    rnb.terminal_counters[k]);
 			}
 
-			for (int k = 0; k < rna.edges.size(); ++k) {
+			for (unsigned int k = 0; k < rna.edges.size(); ++k) {
 				const bcpi_edge &rea = rna.edges[k];
 				const bcpi_edge &reb = rnb.edges[k];
 
@@ -478,7 +479,8 @@ bcpi_is_equal(const bcpi_record &a, const bcpi_record &b)
 				BCPI_CHECK_EQUAL(
 				    rea.to->node_address, rea.to->node_address);
 
-				for (int l = 0; l < a.counters.size(); ++l) {
+				for (unsigned int l = 0; l < a.counters.size();
+				     ++l) {
 					BCPI_CHECK_EQUAL(
 					    rea.counters[l], reb.counters[l]);
 				}
@@ -500,7 +502,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 	int num_function = 0;
 	int num_edge = 0;
 
-	for (int i = 0; i < record.objects.size(); ++i) {
+	for (unsigned int i = 0; i < record.objects.size(); ++i) {
 		const bcpi_object &object = record.objects[i];
 
 		uint64_t function_chain_max = 0;
@@ -511,7 +513,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 
 		num_function += object.functions.size();
 
-		for (int j = 0; j < object.functions.size(); ++j) {
+		for (unsigned int j = 0; j < object.functions.size(); ++j) {
 			const bcpi_function &function = object.functions[j];
 
 			uint64_t function_size = function.end_address -
@@ -539,7 +541,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 		num_node_max = std::max(num_node_max, object.nodes.size());
 		num_node += object.nodes.size();
 
-		for (int j = 0; j < object.nodes.size(); ++j) {
+		for (unsigned int j = 0; j < object.nodes.size(); ++j) {
 			const bcpi_node &node = object.nodes[j];
 
 			node_num_edge_max = std::max(
@@ -556,17 +558,18 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 
 			num_edge += node.edges.size();
 
-			for (int k = 0; k < record.counters.size(); ++k) {
+			for (unsigned int k = 0; k < record.counters.size();
+			     ++k) {
 				counter_maximum[k] = std::max(
 				    counter_maximum[k],
 				    node.terminal_counters[k]);
 			}
 
-			for (int k = 0; k < node.edges.size(); ++k) {
+			for (unsigned int k = 0; k < node.edges.size(); ++k) {
 				const bcpi_edge &edge = node.edges[k];
 
-				for (int l = 0; l < record.counters.size();
-				     ++l) {
+				for (unsigned int l = 0;
+				     l < record.counters.size(); ++l) {
 					counter_maximum[l] = std::max(
 					    counter_maximum[l],
 					    edge.counters[l]);
@@ -582,7 +585,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 		oi->function_first_addr = function_first_addr;
 		oi->node_first_addr = node_first_addr;
 
-		for (int j = 0; j < record.counters.size(); ++j) {
+		for (unsigned int j = 0; j < record.counters.size(); ++j) {
 			oi->counter_bits[j] = BCPI_LOG2(counter_maximum[j]);
 		}
 	}
@@ -644,7 +647,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 	bcpi_serializer_add_int8(builder, node_id_bits);
 	bcpi_serializer_add_int24(builder, record.objects.size());
 
-	for (int i = 0; i < record.objects.size(); ++i) {
+	for (unsigned int i = 0; i < record.objects.size(); ++i) {
 		const bcpi_object &ro = record.objects[i];
 		bcpi_object_info *oi = &object_info[i];
 
@@ -660,7 +663,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 		    sizeof(oi->counter_bits[0]) * record.counters.size();
 		bcpi_serializer_add_bytes(builder, oi, counter_bytes);
 
-		for (int j = 0; j < ro.nodes.size(); ++j) {
+		for (unsigned int j = 0; j < ro.nodes.size(); ++j) {
 			const bcpi_node &rn = ro.nodes[j];
 
 			uint64_t next_node_value = 0;
@@ -677,7 +680,8 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 			    BCPI_CEIL_DIV(oi->node_chain_bits, 8));
 
 			uint64_t counter_nz_flag = 0;
-			for (int k = 0; k < record.counters.size(); ++k) {
+			for (unsigned int k = 0; k < record.counters.size();
+			     ++k) {
 				if (rn.terminal_counters[k]) {
 					counter_nz_flag |= 1 << k;
 				}
@@ -685,7 +689,8 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 
 			bcpi_serializer_add_bytes(builder, &counter_nz_flag,
 			    BCPI_CEIL_DIV(record.counters.size(), 8));
-			for (int k = 0; k < record.counters.size(); ++k) {
+			for (unsigned int k = 0; k < record.counters.size();
+			     ++k) {
 				if (rn.terminal_counters[k]) {
 					bcpi_serializer_add_bytes(builder,
 					    &rn.terminal_counters[k],
@@ -698,7 +703,7 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 			bcpi_serializer_add_bytes(builder, &edges,
 			    BCPI_CEIL_DIV(oi->node_num_edge_bits, 8));
 
-			for (int k = 0; k < rn.edges.size(); ++k) {
+			for (unsigned int k = 0; k < rn.edges.size(); ++k) {
 				const bcpi_edge &re = rn.edges[k];
 
 #ifdef BCPI_DEBUG_FORMAT
@@ -712,8 +717,8 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 				    &re.from->node_index,
 				    BCPI_CEIL_DIV(node_id_bits, 8));
 				uint64_t counter_nz_flag = 0;
-				for (int l = 0; l < record.counters.size();
-				     ++l) {
+				for (unsigned int l = 0;
+				     l < record.counters.size(); ++l) {
 					if (re.counters[l]) {
 						counter_nz_flag |= 1 << l;
 					}
@@ -722,8 +727,8 @@ bcpi_save(const bcpi_record &record, char **buffer, int *size)
 				bcpi_serializer_add_bytes(builder,
 				    &counter_nz_flag,
 				    BCPI_CEIL_DIV(record.counters.size(), 8));
-				for (int l = 0; l < record.counters.size();
-				     ++l) {
+				for (unsigned int l = 0;
+				     l < record.counters.size(); ++l) {
 					if (re.counters[l]) {
 						bcpi_serializer_add_bytes(
 						    builder, &re.counters[l],
@@ -893,11 +898,11 @@ bcpi_load(char *compressed_buffer, int size, bcpi_record *record)
 		}
 	}
 
-	for (int i = 0; i < record->objects.size(); ++i) {
+	for (unsigned int i = 0; i < record->objects.size(); ++i) {
 		bcpi_object &ro = record->objects[i];
-		for (int j = 0; j < ro.nodes.size(); ++j) {
+		for (unsigned int j = 0; j < ro.nodes.size(); ++j) {
 			bcpi_node &rn = ro.nodes[j];
-			for (int k = 0; k < rn.edges.size(); ++k) {
+			for (unsigned int k = 0; k < rn.edges.size(); ++k) {
 				bcpi_edge &re = rn.edges[k];
 				int object_index = (uint64_t)re.from;
 				int node_index = (uint64_t)re.to;
@@ -984,7 +989,8 @@ bcpi_load_file(const char *f, bcpi_record *r)
 }
 
 int
-bcpi_merge(bcpi_record **out, const bcpi_record **list, int num)
+bcpi_merge(bcpi_record **out __unused, const bcpi_record **list __unused,
+    int num __unused)
 {
 	return 0;
 }
@@ -992,7 +998,7 @@ bcpi_merge(bcpi_record **out, const bcpi_record **list, int num)
 int
 bcpi_get_index_from_name(const bcpi_record &record, const std::string &name)
 {
-	for (int i = 0; i < record.counters.size(); ++i) {
+	for (unsigned int i = 0; i < record.counters.size(); ++i) {
 		if (record.counters[i] == name) {
 			return i;
 		}
@@ -1024,10 +1030,10 @@ bcpi_edge_sort_function(const bcpi_edge *a, const bcpi_edge *b)
 void
 bcpi_collect_node(bcpi_record *record, std::vector<bcpi_node *> &node_out)
 {
-	for (int i = 0; i < record->objects.size(); ++i) {
+	for (unsigned int i = 0; i < record->objects.size(); ++i) {
 		bcpi_object &ro = record->objects[i];
 
-		for (int j = 0; j < ro.nodes.size(); ++j) {
+		for (unsigned int j = 0; j < ro.nodes.size(); ++j) {
 			bcpi_node &rn = ro.nodes[j];
 
 			node_out.emplace_back(&rn);
@@ -1039,7 +1045,7 @@ void
 bcpi_collect_object(bcpi_record *record, std::vector<bcpi_object *> &object_out,
     const char *name)
 {
-	for (int i = 0; i < record->objects.size(); ++i) {
+	for (unsigned int i = 0; i < record->objects.size(); ++i) {
 		bcpi_object &ro = record->objects[i];
 		if (ro.path.find(name) != std::string::npos) {
 			object_out.emplace_back(&ro);
@@ -1048,10 +1054,10 @@ bcpi_collect_object(bcpi_record *record, std::vector<bcpi_object *> &object_out,
 }
 
 void
-bcpi_collect_node_from_object(
-    bcpi_record *record, std::vector<bcpi_node *> &node_out, bcpi_object *ro)
+bcpi_collect_node_from_object(bcpi_record *record __unused,
+    std::vector<bcpi_node *> &node_out, bcpi_object *ro)
 {
-	for (int i = 0; i < ro->nodes.size(); ++i) {
+	for (unsigned int i = 0; i < ro->nodes.size(); ++i) {
 		bcpi_node &rn = ro->nodes[i];
 		node_out.push_back(&rn);
 	}
@@ -1060,7 +1066,7 @@ bcpi_collect_node_from_object(
 void
 bcpi_collect_edge(bcpi_node *n, std::vector<bcpi_edge *> &edge_out)
 {
-	for (int i = 0; i < n->edges.size(); ++i) {
+	for (unsigned int i = 0; i < n->edges.size(); ++i) {
 		edge_out.emplace_back(&n->edges[i]);
 	}
 }
@@ -1097,11 +1103,11 @@ bcpi_print_summary(const bcpi_record &r)
 	printf("%s\n", time_buffer);
 	printf("%s\n", r.system_name.c_str());
 	printf("%lu counters\n", r.counters.size());
-	for (int i = 0; i < r.counters.size(); ++i) {
+	for (unsigned int i = 0; i < r.counters.size(); ++i) {
 		printf(" %d: %s\n", i + 1, r.counters[i].c_str());
 	}
 	printf("%lu objects\n", r.objects.size());
-	for (int i = 0; i < r.objects.size(); i++) {
+	for (unsigned int i = 0; i < r.objects.size(); i++) {
 		const bcpi_object &o = r.objects[i];
 		printf(" %3d: %5lu nodes, %8x, %s\n", i + 1, o.nodes.size(),
 		    o.hash, o.path.c_str());
@@ -1113,7 +1119,7 @@ bcpi_dump_edges(const bcpi_record &record, const bcpi_node &node)
 {
 	for (auto &e : node.edges) {
 		printf("        Edge from %08lx", e.from->node_address);
-		for (int c = 0; c < record.counters.size(); c++) {
+		for (unsigned int c = 0; c < record.counters.size(); c++) {
 			printf(" %8ld", e.counters[c]);
 		}
 		printf("\n");
@@ -1129,7 +1135,8 @@ bcpi_dump_nodes(const bcpi_record &record)
 
 		for (auto &n : o.nodes) {
 			printf("    Address %08lx", n.node_address);
-			for (int k = 0; k < record.counters.size(); k++) {
+			for (unsigned int k = 0; k < record.counters.size();
+			     k++) {
 				printf(" %8ld", n.terminal_counters[k]);
 			}
 			printf("\n");
@@ -1145,7 +1152,7 @@ bcpi_show_node_info(bcpi_record *r, bcpi_node *n, const char *sort_crit)
 	    (n->object->object_index) + 1);
 	printf("Address %lx in %s\n", n->node_address, n->object->path.c_str());
 	printf(" Counter hits (as terminal node):\n");
-	for (int i = 0; i < r->counters.size(); ++i) {
+	for (unsigned int i = 0; i < r->counters.size(); ++i) {
 		printf(" %8ld", n->terminal_counters[i]);
 	}
 	printf("\n");
@@ -1161,10 +1168,11 @@ bcpi_show_node_info(bcpi_record *r, bcpi_node *n, const char *sort_crit)
 
 	// printf(" Callchain reaching this node (exclude above):\n");
 	// int edge_size = edges.size();
-	// for (int i = 0; i < edge_size; ++i) {
+	// for (unsigned int i = 0; i < edge_size; ++i) {
 	//    bcpi_edge *e = edges[i];
 	//    printf(" %lx in %s\n", e->from->node_address,
-	//    e->from->object->path); for (int j = 0; j < r->num_counter; ++j) {
+	//    e->from->object->path); for (unsigned int j = 0; j <
+	//    r->num_counter; ++j) {
 	//        printf(" %8ld", e->counters[j]);
 	//    }
 	//    printf("\n");
@@ -1189,11 +1197,12 @@ vec2hash_merge_nodes(std::vector<bcpi_node *> nodes)
 {
 	std::unordered_map<uint64_t, bcpi_node *> umap;
 
-	for (int i = 0; i < nodes.size(); i++) {
+	for (unsigned int i = 0; i < nodes.size(); i++) {
 		if (umap.find(nodes[i]->node_address) == umap.end()) {
 			umap.emplace(nodes[i]->node_address, nodes[i]);
 		} else {
-			for (int c = 0; c < BCPI_MAX_NUM_COUNTER; c++) {
+			for (unsigned int c = 0; c < BCPI_MAX_NUM_COUNTER;
+			     c++) {
 				umap[nodes[i]->node_address]
 				    ->terminal_counters[c] +=
 				    nodes[i]->terminal_counters[c];
@@ -1208,7 +1217,7 @@ std::vector<bcpi_node *>
 vec2hash_merge_nodes(int index, std::vector<bcpi_node *> nodes)
 {
 	std::unordered_map<uint64_t, bcpi_node *> umap;
-	for (int i = 0; i < nodes.size(); i++) {
+	for (unsigned int i = 0; i < nodes.size(); i++) {
 		if (umap.find(nodes[i]->node_address) == umap.end())
 			umap.emplace(nodes[i]->node_address, nodes[i]);
 		else

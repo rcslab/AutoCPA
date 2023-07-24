@@ -183,7 +183,7 @@ load_sections(Elf *e, size_t shnum)
 		i++;
 	} while ((scn = elf_nextscn(e, scn)) != NULL);
 
-	if (i != shnum) {
+	if ((unsigned int)i != shnum) {
 		printf("error i = %d, shnum = %zu\n", i, shnum);
 	}
 
