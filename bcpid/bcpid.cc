@@ -611,7 +611,7 @@ bcpid_save(bcpid *b)
 		++name_index;
 	}
 
-	int num_object = 0;
+	int num_object __unused = 0;
 	for (auto &object_it : b->path_to_object) {
 		bcpid_object *object = object_it.second;
 

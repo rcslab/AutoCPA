@@ -22,9 +22,9 @@ struct bcpi_serializer {
 	int max_size;
 	int size;
 	int read_cursor;
-	int overflow : 1;
-	int underflow : 1;
-	int read_mode : 1;
+	unsigned int overflow : 1;
+	unsigned int underflow : 1;
+	unsigned int read_mode : 1;
 	char *data;
 };
 
