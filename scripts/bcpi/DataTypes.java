@@ -54,7 +54,7 @@ public class DataTypes {
 		for (var field : struct.getDefinedComponents()) {
 			var offset = field.getOffset();
 			var fieldType = field.getDataType();
-			var size = fieldType.getLength(); // *not* field.getLength()
+			var size = Math.max(field.getLength(), fieldType.getLength());
 			var name = field.getFieldName();
 			var comment = field.getComment();
 			if (field.isBitFieldComponent()) {
@@ -65,7 +65,8 @@ public class DataTypes {
 				try {
 					copy.insertBitFieldAt(offset, size, bitOffset, baseType, bitSize, name, comment);
 				} catch (Exception e) {
-					throw Throwables.propagate(e);
+					Throwables.throwIfUnchecked(e);
+					throw new RuntimeException(e);
 				}
 			} else {
 				copy.insertAtOffset(offset, fieldType, size, name, comment);
