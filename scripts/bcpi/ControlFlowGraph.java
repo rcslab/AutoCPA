@@ -163,6 +163,11 @@ public class ControlFlowGraph {
 		for (CodeBlockVertex vertex : sinks) {
 			addEdge(vertex, sink);
 		}
+
+		// Make sure empty CFGs are connected
+		if (!this.cfg.containsVertex(source)) {
+			addEdge(source, sink);
+		}
 	}
 
 	/**
