@@ -12,7 +12,7 @@ KLDSTAT=$2
 CSV=$3
 shift 3
 
-: >"$CSV"
+TMP=$(mktemp -p "$(dirname -- "$CSV")")
 
 while read id refs base size name; do
     if [ "$base" = "Address" ]; then
@@ -21,10 +21,12 @@ while read id refs base size name; do
 
     ./bcpiquery/bcpiquery extract -o "$KERNEL/$name" "$@"
     if [ "$name" = "kernel" ]; then
-        cat address_info.csv >>"$CSV"
+        cat address_info.csv >>"$TMP"
     else
         while IFS=',' read addr rest; do
             printf '%x,%s\n' "$(($base + 0x$addr))" "$rest"
-        done <address_info.csv >>"$CSV"
+        done <address_info.csv >>"$TMP"
     fi
 done <"$KLDSTAT"
+
+mv "$TMP" "$CSV"
