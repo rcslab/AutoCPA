@@ -2,10 +2,8 @@ package bcpi;
 
 import ghidra.program.model.data.Structure;
 
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.SetMultimap;
-
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -21,7 +19,7 @@ public class StructAbiConstraints {
 	private final Map<String, Integer> indices;
 	private final int[] fixed;
 	private final int[] groups;
-	private final SetMultimap<Integer, Integer> groupOrdering;
+	private final BitSet[] groupOrdering;
 
 	public StructAbiConstraints(Structure struct) {
 		this.struct = struct;
@@ -44,7 +42,7 @@ public class StructAbiConstraints {
 		this.groups = new int[nFields];
 		Arrays.fill(this.groups, -1);
 
-		this.groupOrdering = HashMultimap.create();
+		this.groupOrdering = new BitSet[nFields];
 	}
 
 	private int getIndex(String field) {
@@ -70,6 +68,7 @@ public class StructAbiConstraints {
 
 	/** Set the group constraint for a field. */
 	public void setGroup(String field, int group) {
+		Objects.checkIndex(group, this.groupOrdering.length);
 		setGroup(getIndex(field), group);
 	}
 
@@ -85,7 +84,15 @@ public class StructAbiConstraints {
 
 	/** Constrain the relative orders of two groups. */
 	public void orderGroups(int before, int after) {
-		this.groupOrdering.put(before, after);
+		var order = this.groupOrdering;
+		Objects.checkIndex(before, order.length);
+		Objects.checkIndex(after, order.length);
+
+		var bits = order[before];
+		if (bits == null) {
+			bits = order[before] = new BitSet(order.length);
+		}
+		bits.set(after);
 	}
 
 	/** Set a fixed position for a field. */
@@ -104,12 +111,12 @@ public class StructAbiConstraints {
 	/**
 	 * @return Whether this field order satisfies the constraints.
 	 */
-	public boolean check(List<Field> fields, int i) {
+	public boolean check(List<Field> fields) {
 		if (!checkFixed(fields)) {
 			return false;
 		}
 
-		if (!checkGroups(fields, i)) {
+		if (!checkGroups(fields)) {
 			return false;
 		}
 
@@ -130,29 +137,38 @@ public class StructAbiConstraints {
 	}
 
 	/** Check group constraints. */
-	private boolean checkGroups(List<Field> fields, int i) {
-		int group = getGroup(fields.get(i));
-		if (group == -1) {
-			// No group constraints for this field
-			return true;
+	private boolean checkGroups(List<Field> fields) {
+		var groups = new int[fields.size()];
+		for (int i = 0; i < groups.length; ++i) {
+			groups[i] = getGroup(fields.get(i));
 		}
 
-		int start = -1, end = -1;
-		for (int j = 0; j < fields.size(); ++j) {
-			int other = getGroup(fields.get(j));
-			if (other == group) {
-				if (start < 0) {
-					start = j;
-				}
-				end = j;
-			} else if (j < i && !checkGroupOrdering(other, group)) {
-				return false;
-			} else if (j > i && !checkGroupOrdering(group, other)) {
-				return false;
+		// Collapse consecutive duplicates
+		int length = 0;
+		for (int i = 1; i < groups.length; ++i) {
+			if (groups[i] != groups[length]) {
+				++length;
+				groups[length] = groups[i];
 			}
 		}
 
-		return i >= start && i <= end;
+		for (int i = 0; i < length; ++i) {
+			if (groups[i] < 0) {
+				continue;
+			}
+
+			for (int j = i + 1; j < length; ++j) {
+				if (groups[j] < 0) {
+					continue;
+				}
+
+				if (!checkGroupOrdering(groups[i], groups[j])) {
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	private int getGroup(Field field) {
@@ -161,6 +177,17 @@ public class StructAbiConstraints {
 
 	/** Check the relative order of two groups. */
 	private boolean checkGroupOrdering(int before, int after) {
-		return !this.groupOrdering.get(after).contains(before);
+		if (before == after) {
+			// Discontiguous group
+			return false;
+		}
+
+		// Check that we don't have an after<before constraint
+		var bits = this.groupOrdering[after];
+		if (bits == null) {
+			return true;
+		} else {
+			return !bits.get(before);
+		}
 	}
 }

@@ -72,7 +72,7 @@ public class StructLayoutOptimizer {
 		int bestI = -1;
 		long bestCost = -1;
 		for (int i = fields.size() - 1; ; --i) {
-			if (this.constraints.check(fields, i)) {
+			if (this.constraints.check(fields)) {
 				long newCost = this.costModel.cost(build(fields));
 				if (bestI < 0 || newCost < bestCost) {
 					bestI = i;
