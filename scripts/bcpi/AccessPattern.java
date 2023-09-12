@@ -21,6 +21,13 @@ public class AccessPattern {
 	private final BitSet written;
 
 	public AccessPattern(Composite type, BitSet read, BitSet written) {
+		var size = Math.max(read.length(), written.length());
+		if (size > type.getLength()) {
+			throw new IllegalArgumentException(String.format(
+				"%d-byte access pattern is larger than %d-byte %s",
+				size, type.getLength(), DataTypes.formatCDecl(type)));
+		}
+
 		this.type = type;
 		this.read = (BitSet) read.clone();
 		this.written = (BitSet) written.clone();
@@ -160,26 +167,28 @@ public class AccessPattern {
 	public AccessPattern project(DataTypeComponent field) {
 		checkFieldParent(field);
 
-		BitSet read = this.read.get(field.getOffset(), field.getEndOffset() + 1);
-		BitSet written = this.written.get(field.getOffset(), field.getEndOffset() + 1);
-
 		DataType type = DataTypes.resolve(field.getDataType());
+
+		int start = field.getOffset();
+		int end = start + type.getLength();
+		BitSet read = this.read.get(start, end);
+		BitSet written = this.written.get(start, end);
 
 		// Unwrap arrays and merge accesses to different elements
 		while (type instanceof Array) {
 			Array array = (Array) type;
+			type = DataTypes.resolve(array.getDataType());
 
-			int size = array.getElementLength();
+			int size = type.getLength();
 			BitSet newRead = new BitSet(size);
 			BitSet newWritten = new BitSet(size);
-			for (int i = 0; i < array.getNumElements(); ++i) {
-				newRead.or(read.get(size * i, size * (i + 1)));
-				newWritten.or(written.get(size * i, size * (i + 1)));
+			for (int i = 0, j = 0; i < array.getNumElements(); ++i, j += size) {
+				newRead.or(read.get(j, j + size));
+				newWritten.or(written.get(j, j + size));
 			}
 
 			read = newRead;
 			written = newWritten;
-			type = DataTypes.resolve(array.getDataType());
 		}
 
 		if (type instanceof Composite) {

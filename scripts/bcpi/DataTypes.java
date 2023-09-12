@@ -72,7 +72,11 @@ public class DataTypes {
 				copy.insertAtOffset(offset, fieldType, size, name, comment);
 			}
 		}
-		padTail(copy, getAlignment(struct));
+
+		var padding = struct.getLength() - copy.getLength();
+		if (padding > 0) {
+			copy.add(DefaultDataType.dataType, padding);
+		}
 
 		return copy;
 	}
