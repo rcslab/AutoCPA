@@ -1,5 +1,7 @@
 package bcpi;
 
+import bcpi.util.Counter;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.data.Composite;
@@ -30,7 +32,7 @@ import java.util.stream.Collectors;
 public class AccessPatterns {
 	// Stores the access patterns for each struct
 	private final ConcurrentMap<Structure, Set<AccessPattern>> patterns = new ConcurrentHashMap<>();
-	private final ConcurrentMap<AccessPattern, LongAdder> counts = new ConcurrentHashMap<>();
+	private final Counter<AccessPattern> counts = new Counter<>();
 	private final ConcurrentMap<AccessPattern, Set<Function>> functions = new ConcurrentHashMap<>();
 	private final LongAdder samples = new LongAdder();
 	private final LongAdder attributed = new LongAdder();
@@ -103,8 +105,7 @@ public class AccessPatterns {
 			.computeIfAbsent(struct, k -> ConcurrentHashMap.newKeySet())
 			.add(pattern);
 		this.counts
-			.computeIfAbsent(pattern, k -> new LongAdder())
-			.add(count);
+			.add(pattern, count);
 		this.functions
 			.computeIfAbsent(pattern, k -> ConcurrentHashMap.newKeySet())
 			.add(func);
@@ -169,9 +170,7 @@ public class AccessPatterns {
 	 * @return The number of occurrences of an access pattern.
 	 */
 	public long getCount(AccessPattern pattern) {
-		return this.counts
-			.getOrDefault(pattern, new LongAdder())
-			.sum();
+		return this.counts.get(pattern);
 	}
 
 	/**

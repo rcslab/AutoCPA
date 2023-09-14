@@ -1,12 +1,12 @@
 package bcpi;
 
+import bcpi.util.Counter;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.HashMultiset;
-import com.google.common.collect.Multiset;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -50,10 +50,10 @@ public class BcpiData {
 						continue;
 					}
 
-					Multiset<String> counters = HashMultiset.create();
+					Counter<String> counters = new Counter<>();
 					for (int i = 1; i < values.length; ++i) {
 						String[] kv = values[i].split("=");
-						counters.add(kv[0], Integer.parseInt(kv[1]));
+						counters.add(kv[0], Long.parseLong(kv[1]));
 					}
 					rows.put(address, new BcpiDataRow(address, program, function, counters));
 					break;
@@ -84,7 +84,7 @@ public class BcpiData {
 	/**
 	 * @return The number of events collected for the given address and counter.
 	 */
-	public int getCount(Address address, String counter) {
+	public long getCount(Address address, String counter) {
 		BcpiDataRow row = this.rows.get(address);
 		if (row == null) {
 			return 0;
