@@ -33,6 +33,7 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.html.HtmlEscapers;
 
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -224,14 +225,26 @@ class FixedFieldConstraint implements ConstraintArg {
  */
 public class StructOrderAnalysis extends BcpiAnalysis {
 	private ListMultimap<String, ConstraintArg> constraints = ArrayListMultimap.create();
+	private long time;
+
+	private void timerMsg(String msg) {
+		long now = System.currentTimeMillis();
+		Msg.info(this, String.format("%s took %,d ms", msg, now - time));
+		this.time = now;
+	}
 
 	@Override
 	protected void analyze(String[] args) throws Exception {
+		long uptime = ManagementFactory.getRuntimeMXBean().getUptime();
+		this.time = System.currentTimeMillis() - uptime;
+		timerMsg("Starting analysis");
+
 		var ctx = getContext();
 
 		// Read address_info.csv to find relevant addresses
 		Path csv = Paths.get(args[0]);
 		BcpiData data = BcpiData.parse(csv, ctx);
+		timerMsg("Parsing data");
 
 		// Process command line arguments
 		for (int i = 1; i < args.length; ++i) {
@@ -259,19 +272,23 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 
 		BcpiControlFlow cfgs = new BcpiControlFlow(ctx);
 		cfgs.addCoverage(data);
+		timerMsg("Adding coverage");
 
 		FieldReferences refs = new FieldReferences(ctx, cfgs);
 		refs.collect(funcs);
+		timerMsg("Computing data flow");
 
 		// Use our collected data to infer field access patterns
 		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
 		patterns.collect(data);
 		double hitRate = 100.0 * patterns.getHitRate();
 		Msg.info(this, String.format("Found patterns for %.2f%% of samples", hitRate));
+		timerMsg("Collecting access patterns");
 
 		String name = getState().getProject().getName();
 		Path results = Paths.get("./results").resolve(name);
 		render(patterns, results);
+		timerMsg("Optimizing structures");
 	}
 
 	/**
