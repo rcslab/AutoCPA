@@ -2,6 +2,7 @@ package bcpi.type;
 
 import bcpi.util.Cache;
 
+import ghidra.program.model.data.Array;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypePath;
 
@@ -48,6 +49,10 @@ class BcpiTypeCache {
 
 	private static BcpiType compute(DataTypeKey key) {
 		var type = key.type;
-		return new BcpiPrimitive(type);
+		if (type instanceof Array t) {
+			return new BcpiArray(t);
+		} else {
+			return new BcpiPrimitive(type);
+		}
 	}
 }
