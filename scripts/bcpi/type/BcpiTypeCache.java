@@ -8,6 +8,7 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypePath;
 import ghidra.program.model.data.Enum;
 import ghidra.program.model.data.FunctionDefinition;
+import ghidra.program.model.data.Pointer;
 
 /**
  * Cached BCPI type conversions.
@@ -60,6 +61,8 @@ class BcpiTypeCache {
 			return new BcpiEnum(t);
 		} else if (type instanceof FunctionDefinition t) {
 			return new BcpiFunctionType(t);
+		} else if (type instanceof Pointer t) {
+			return new BcpiPointer(t);
 		} else {
 			return new BcpiPrimitive(type);
 		}
