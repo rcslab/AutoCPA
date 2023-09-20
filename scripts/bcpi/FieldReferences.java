@@ -2,10 +2,10 @@ package bcpi;
 
 import bcpi.dataflow.BcpiDomain;
 import bcpi.dataflow.DataFlow;
+import bcpi.type.BcpiAggregate;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
-import ghidra.program.model.data.Composite;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.pcode.HighFunction;
@@ -167,17 +167,18 @@ public class FieldReferences {
 		}
 
 		var type = facts.getType().get();
-		if (!(type instanceof Composite)) {
+		if (!(type instanceof BcpiAggregate)) {
 			return;
 		}
+		var aggType = (BcpiAggregate)type;
 
 		int offset = facts.getOffset().getAsInt();
 		int size = value.getSize();
-		if (offset < 0 || offset + size > type.getLength()) {
+		if (offset < 0 || offset + size > type.getByteSize()) {
 			return;
 		}
 
 		updateFields(op.getSeqnum().getTarget())
-			.add(new FieldReference((Composite) type, facts.isMaybeArray(), offset, size, isRead));
+			.add(new FieldReference(aggType.toGhidra(), facts.isMaybeArray(), offset, size, isRead));
 	}
 }

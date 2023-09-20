@@ -1,8 +1,7 @@
 package bcpi.dataflow;
 
-import bcpi.DataTypes;
+import bcpi.type.BcpiType;
 
-import ghidra.program.model.data.DataType;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
@@ -20,13 +19,13 @@ import java.util.stream.Collectors;
  */
 public class PtrDomain implements SparseDomain<PtrDomain, BcpiVarDomain> {
 	/** The type of the outermost known allocation we point to. */
-	private final Flattice<DataType> type;
+	private final Flattice<BcpiType> type;
 	/** The offset from the base of the outer allocation. */
 	private final IntDomain offset;
 	/** Whether the allocation might be an array. */
 	private boolean maybeArray;
 
-	private PtrDomain(Flattice<DataType> type, IntDomain offset, boolean maybeArray) {
+	private PtrDomain(Flattice<BcpiType> type, IntDomain offset, boolean maybeArray) {
 		this.type = type;
 		this.offset = offset;
 		this.maybeArray = maybeArray;
@@ -63,7 +62,7 @@ public class PtrDomain implements SparseDomain<PtrDomain, BcpiVarDomain> {
 	/**
 	 * @return The type of the pointed-to allocation.
 	 */
-	public Optional<DataType> getType() {
+	public Optional<BcpiType> getType() {
 		return this.type.get();
 	}
 
@@ -83,7 +82,7 @@ public class PtrDomain implements SparseDomain<PtrDomain, BcpiVarDomain> {
 			return OptionalInt.empty();
 		}
 
-		var wrapped = this.offset.mod(type.getLength());
+		var wrapped = this.offset.mod(type.getByteSize());
 		var offset = wrapped.getIfConstant();
 		if (!offset.isPresent()) {
 			return OptionalInt.empty();
@@ -145,9 +144,9 @@ public class PtrDomain implements SparseDomain<PtrDomain, BcpiVarDomain> {
 		var type = Optional
 			.ofNullable(vn.getHigh())        // Get the high-level variable
 			.map(HighVariable::getDataType)  // Get its type
-			.flatMap(DataTypes::dereference) // Dereference it
-			.map(DataTypes::resolve)         // Resolve typedefs
-			.map(DataTypes::dedup)           // Deduplicate it
+			.map(BcpiType::from)             // Convert to BCPI
+			.map(BcpiType::dereference)      // Dereference it
+			.map(BcpiType::resolve)          // Resolve typedefs
 			.map(Flattice::of)               // Wrap in a lattice
 			.orElseGet(Flattice::bottom);    // Fall back to the bottom element
 
@@ -272,7 +271,7 @@ public class PtrDomain implements SparseDomain<PtrDomain, BcpiVarDomain> {
 			return "⊤";
 		} else {
 			String type = this.type.get()
-				.map(DataTypes::formatCDecl)
+				.map(BcpiType::toC)
 				.orElseGet(this.type::toString);
 			String array = this.maybeArray ? "[]" : "*";
 			return String.format("{%s%s + %s}", type, array, this.offset);
