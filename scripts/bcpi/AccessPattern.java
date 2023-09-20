@@ -1,7 +1,10 @@
 package bcpi;
 
-import ghidra.program.model.data.Array;
-import ghidra.program.model.data.DataType;
+import bcpi.type.BcpiAggregate;
+import bcpi.type.BcpiArray;
+import bcpi.type.BcpiType;
+import bcpi.type.Field;
+
 import ghidra.program.model.data.Composite;
 import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.Structure;
@@ -16,27 +19,27 @@ import java.util.stream.Collectors;
  * A set of fields accessed in a block.
  */
 public class AccessPattern {
-	private final Composite type;
+	private final BcpiAggregate type;
 	private final BitSet read;
 	private final BitSet written;
 
-	public AccessPattern(Composite type, BitSet read, BitSet written) {
+	public AccessPattern(BcpiAggregate type, BitSet read, BitSet written) {
 		var size = Math.max(read.length(), written.length());
-		if (size > type.getLength()) {
+		if (size > type.getByteSize()) {
 			throw new IllegalArgumentException(String.format(
 				"%d-byte access pattern is larger than %d-byte %s",
-				size, type.getLength(), DataTypes.formatCDecl(type)));
+				size, type.getByteSize(), type));
 		}
 
 		this.type = type;
-		this.read = (BitSet) read.clone();
-		this.written = (BitSet) written.clone();
+		this.read = (BitSet)read.clone();
+		this.written = (BitSet)written.clone();
 	}
 
 	/**
 	 * @return The type this access pattern applies to.
 	 */
-	public Composite getType() {
+	public BcpiAggregate getType() {
 		return this.type;
 	}
 
@@ -53,21 +56,28 @@ public class AccessPattern {
 	 * @return The bytes read by this pattern.
 	 */
 	public BitSet getReadBytes() {
-		return (BitSet) this.read.clone();
+		return (BitSet)this.read.clone();
 	}
 
 	/**
 	 * @return The bytes written by this pattern.
 	 */
 	public BitSet getWrittenBytes() {
-		return (BitSet) this.written.clone();
+		return (BitSet)this.written.clone();
 	}
 
 	/**
 	 * @return All the fields accessed by this pattern.
 	 */
 	public List<Field> getFields() {
-		return Field.allFields((Structure) this.type)
+		return this.type.getFields()
+			.stream()
+			.filter(this::accesses)
+			.collect(Collectors.toList());
+	}
+
+	public List<bcpi.Field> getLegacyFields() {
+		return bcpi.Field.allFields((Structure)this.type.toGhidra())
 			.stream()
 			.filter(this::accesses)
 			.collect(Collectors.toList());
@@ -77,21 +87,29 @@ public class AccessPattern {
 	 * Check that a field is from the right type.
 	 */
 	private void checkFieldParent(DataTypeComponent field) {
-		if (!DataTypes.areEqual(this.type, field.getParent())) {
+		if (!BcpiType.from(field.getParent()).equals(this.type)) {
 			throw new IllegalArgumentException(String.format(
-				"Field %s::% is not from type %s",
-				field.getParent().getName(),
-				field.getFieldName(),
-				this.type.getName()));
+				"Field %s not from type %s", field, this.type));
 		}
 	}
-
 
 	/**
 	 * Check that a field is from the right type.
 	 */
 	private void checkFieldParent(Field field) {
-		checkFieldParent(field.getComponents().get(0));
+		if (!field.getParent().equals(this.type)) {
+			throw new IllegalArgumentException(String.format(
+				"Field %s is not from type %s", field, this.type));
+		}
+	}
+
+	/**
+	 * @return Whether a field is accessed by this pattern.
+	 */
+	public boolean accesses(bcpi.Field field) {
+		return field.getComponents()
+			.stream()
+			.anyMatch(this::accesses);
 	}
 
 	/**
@@ -101,7 +119,7 @@ public class AccessPattern {
 		checkFieldParent(field);
 
 		BitSet bytes = new BitSet();
-		bytes.set(field.getOffset(), field.getEndOffset());
+		bytes.set(field.getStartByte(), field.getEndByte());
 		return this.read.intersects(bytes) || this.written.intersects(bytes);
 	}
 
@@ -119,11 +137,20 @@ public class AccessPattern {
 	/**
 	 * @return Whether a field is read by this pattern.
 	 */
+	public boolean reads(bcpi.Field field) {
+		return field.getComponents()
+			.stream()
+			.anyMatch(this::reads);
+	}
+
+	/**
+	 * @return Whether a field is read by this pattern.
+	 */
 	public boolean reads(Field field) {
 		checkFieldParent(field);
 
 		BitSet bytes = new BitSet();
-		bytes.set(field.getOffset(), field.getEndOffset());
+		bytes.set(field.getStartByte(), field.getEndByte());
 		return this.read.intersects(bytes);
 	}
 
@@ -141,11 +168,20 @@ public class AccessPattern {
 	/**
 	 * @return Whether a field is written by this pattern.
 	 */
+	public boolean writes(bcpi.Field field) {
+		return field.getComponents()
+			.stream()
+			.anyMatch(this::writes);
+	}
+
+	/**
+	 * @return Whether a field is written by this pattern.
+	 */
 	public boolean writes(Field field) {
 		checkFieldParent(field);
 
 		BitSet bytes = new BitSet();
-		bytes.set(field.getOffset(), field.getEndOffset());
+		bytes.set(field.getStartByte(), field.getEndByte());
 		return this.written.intersects(bytes);
 	}
 
@@ -164,25 +200,24 @@ public class AccessPattern {
 	 * @return The portion of this access pattern that applies to a field,
 	 *         or null if the field is not a composite.
 	 */
-	public AccessPattern project(DataTypeComponent field) {
+	public AccessPattern project(Field field) {
 		checkFieldParent(field);
 
-		DataType type = DataTypes.resolve(field.getDataType());
-
-		int start = field.getOffset();
-		int end = start + type.getLength();
+		var type = field.getType().resolve();
+		int start = field.getStartByte();
+		int end = start + type.getByteSize();
 		BitSet read = this.read.get(start, end);
 		BitSet written = this.written.get(start, end);
 
 		// Unwrap arrays and merge accesses to different elements
-		while (type instanceof Array) {
-			Array array = (Array) type;
-			type = DataTypes.resolve(array.getDataType());
+		while (type instanceof BcpiArray) {
+			var array = (BcpiArray)type;
+			type = array.unwrap().resolve();
 
-			int size = type.getLength();
+			int size = type.getByteSize();
 			BitSet newRead = new BitSet(size);
 			BitSet newWritten = new BitSet(size);
-			for (int i = 0, j = 0; i < array.getNumElements(); ++i, j += size) {
+			for (int i = 0, j = 0; i < array.getCount(); ++i, j += size) {
 				newRead.or(read.get(j, j + size));
 				newWritten.or(written.get(j, j + size));
 			}
@@ -191,9 +226,8 @@ public class AccessPattern {
 			written = newWritten;
 		}
 
-		if (type instanceof Composite) {
-			type = DataTypes.dedup(type);
-			return new AccessPattern((Composite) type, read, written);
+		if (type instanceof BcpiAggregate) {
+			return new AccessPattern((BcpiAggregate)type, read, written);
 		} else {
 			return null;
 		}
@@ -201,13 +235,13 @@ public class AccessPattern {
 
 	@Override
 	public String toString() {
-		return toString(DataTypes.formatCDecl(this.type) + "::");
+		return toString(this.type.toC() + "::");
 	}
 
 	private String toString(String prefix) {
 		List<String> fields = new ArrayList<>();
 
-		for (DataTypeComponent field : this.type.getDefinedComponents()) {
+		for (var field : this.type.getFields()) {
 			if (!accesses(field)) {
 				continue;
 			}
@@ -216,9 +250,9 @@ public class AccessPattern {
 			if (proj == null) {
 				String r = reads(field) ? "R" : "";
 				String w = writes(field) ? "W" : "";
-				fields.add(String.format("%s(%s%s)", field.getFieldName(), r, w));
+				fields.add(String.format("%s(%s%s)", field.getName(), r, w));
 			} else {
-				fields.add(proj.toString(field.getFieldName() + "."));
+				fields.add(proj.toString(field.getName() + "."));
 			}
 		}
 

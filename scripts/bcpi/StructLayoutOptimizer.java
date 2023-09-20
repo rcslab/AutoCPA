@@ -45,13 +45,13 @@ public class StructLayoutOptimizer {
 
 		// Then access patterns from most common to least
 		for (AccessPattern pattern : patterns.getRankedPatterns(this.original)) {
-			pattern.getFields()
+			pattern.getLegacyFields()
 				.stream()
 				.filter(f -> !added.contains(f))
 				.sorted(Comparator.comparingInt(f -> f.getOrdinal()))
 				.forEach(f -> pack(fields, f));
 
-			added.addAll(pattern.getFields());
+			added.addAll(pattern.getLegacyFields());
 		}
 
 		// Add any missing fields we didn't see

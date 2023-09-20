@@ -696,21 +696,19 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 					.replace(0, 3, "...");
 			}
 
-			for (Field field : pattern.getFields()) {
+			for (var field : pattern.getFields()) {
 				boolean read = pattern.reads(field);
 				boolean written = pattern.writes(field);
 
-				for (DataTypeComponent component : field.getComponents()) {
-					String name = component.getFieldName();
-					fieldPatterns.put(name, patternId);
+				String name = field.getName();
+				fieldPatterns.put(name, patternId);
 
-					StringBuilder str = table.get(rows.get(name), col);
-					if (col < MAX_COLS) {
-						str.append(read ? "R" : " ");
-						str.append(written ? "W" : " ");
-					} else {
-						str.replace(0, 3, "...");
-					}
+				StringBuilder str = table.get(rows.get(name), col);
+				if (col < MAX_COLS) {
+					str.append(read ? "R" : " ");
+					str.append(written ? "W" : " ");
+				} else {
+					str.replace(0, 3, "...");
 				}
 			}
 		}
@@ -922,14 +920,10 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 		out.println("<code>" + htmlEscape(decl) + "</code>");
 		out.println("<ul>");
 
-		for (DataTypeComponent field : pattern.getType().getDefinedComponents()) {
-			if (!pattern.accesses(field)) {
-				continue;
-			}
-
+		for (var field : pattern.getFields()) {
 			out.print("<li>");
 
-			String fieldDecl = DataTypes.formatCDecl(field.getDataType(), field.getFieldName());
+			String fieldDecl = field.getType().toC(field.getName());
 			AccessPattern proj = pattern.project(field);
 			if (proj == null) {
 				String r = pattern.reads(field) ? "R" : "";
