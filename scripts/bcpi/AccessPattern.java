@@ -5,10 +5,6 @@ import bcpi.type.BcpiArray;
 import bcpi.type.BcpiType;
 import bcpi.type.Field;
 
-import ghidra.program.model.data.Composite;
-import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.Structure;
-
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -76,23 +72,6 @@ public class AccessPattern {
 			.collect(Collectors.toList());
 	}
 
-	public List<bcpi.Field> getLegacyFields() {
-		return bcpi.Field.allFields((Structure)this.type.toGhidra())
-			.stream()
-			.filter(this::accesses)
-			.collect(Collectors.toList());
-	}
-
-	/**
-	 * Check that a field is from the right type.
-	 */
-	private void checkFieldParent(DataTypeComponent field) {
-		if (!BcpiType.from(field.getParent()).equals(this.type)) {
-			throw new IllegalArgumentException(String.format(
-				"Field %s not from type %s", field, this.type));
-		}
-	}
-
 	/**
 	 * Check that a field is from the right type.
 	 */
@@ -101,15 +80,6 @@ public class AccessPattern {
 			throw new IllegalArgumentException(String.format(
 				"Field %s is not from type %s", field, this.type));
 		}
-	}
-
-	/**
-	 * @return Whether a field is accessed by this pattern.
-	 */
-	public boolean accesses(bcpi.Field field) {
-		return field.getComponents()
-			.stream()
-			.anyMatch(this::accesses);
 	}
 
 	/**
@@ -124,26 +94,6 @@ public class AccessPattern {
 	}
 
 	/**
-	 * @return Whether a field is accessed by this pattern.
-	 */
-	public boolean accesses(DataTypeComponent field) {
-		checkFieldParent(field);
-
-		BitSet bytes = new BitSet();
-		bytes.set(field.getOffset(), field.getEndOffset() + 1);
-		return this.read.intersects(bytes) || this.written.intersects(bytes);
-	}
-
-	/**
-	 * @return Whether a field is read by this pattern.
-	 */
-	public boolean reads(bcpi.Field field) {
-		return field.getComponents()
-			.stream()
-			.anyMatch(this::reads);
-	}
-
-	/**
 	 * @return Whether a field is read by this pattern.
 	 */
 	public boolean reads(Field field) {
@@ -155,26 +105,6 @@ public class AccessPattern {
 	}
 
 	/**
-	 * @return Whether a field is read by this pattern.
-	 */
-	public boolean reads(DataTypeComponent field) {
-		checkFieldParent(field);
-
-		BitSet bytes = new BitSet();
-		bytes.set(field.getOffset(), field.getEndOffset() + 1);
-		return this.read.intersects(bytes);
-	}
-
-	/**
-	 * @return Whether a field is written by this pattern.
-	 */
-	public boolean writes(bcpi.Field field) {
-		return field.getComponents()
-			.stream()
-			.anyMatch(this::writes);
-	}
-
-	/**
 	 * @return Whether a field is written by this pattern.
 	 */
 	public boolean writes(Field field) {
@@ -182,17 +112,6 @@ public class AccessPattern {
 
 		BitSet bytes = new BitSet();
 		bytes.set(field.getStartByte(), field.getEndByte());
-		return this.written.intersects(bytes);
-	}
-
-	/**
-	 * @return Whether a field is written by this pattern.
-	 */
-	public boolean writes(DataTypeComponent field) {
-		checkFieldParent(field);
-
-		BitSet bytes = new BitSet();
-		bytes.set(field.getOffset(), field.getEndOffset() + 1);
 		return this.written.intersects(bytes);
 	}
 

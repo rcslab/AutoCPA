@@ -121,42 +121,12 @@ public class DataTypes {
 			.map(t -> ((Pointer) t).getDataType());
 	}
 
-	/**
-	 * Get the fields of an composite type within a memory range.
-	 */
-	public static List<Field> getFieldsBetween(DataType type, int offset, int endOffset) {
-		List<Field> fields = new ArrayList<>();
-		collectFieldsBetween(type, offset, endOffset, fields);
-		return fields;
-	}
-
-	private static void collectFieldsBetween(DataType type, int offset, int endOffset, List<Field> fields) {
-		type = resolve(type);
-
-		if (type instanceof Structure) {
-			Structure struct = (Structure) dedup(type);
-			for (Field field : Field.allFields(struct)) {
-				int pos = field.getOffset();
-				int start = Math.max(offset, field.getOffset()) - pos;
-				int end = Math.min(endOffset, field.getEndOffset()) - pos;
-				if (start < end) {
-					fields.add(field);
-					collectFieldsBetween(field.getDataType(), start, end, fields);
-				}
-			}
-		}
-	}
-
-	/**
-	 * Get the byte alignment of a structure.
-	 */
-	public static int getAlignment(Structure struct) {
-		int align = struct.getAlignment();
-		for (Field field : Field.allFields(struct)) {
-			align = Math.max(align, field.getDataType().getAlignment());
-		}
-		return align;
-	}
+        /**
+         * @return Whether the given component is padding.
+         */
+        public static boolean isPadding(DataTypeComponent component) {
+                return component.getDataType().equals(DefaultDataType.dataType);
+        }
 
 	/**
 	 * Add a field to the end of a struct.

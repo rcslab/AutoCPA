@@ -6,7 +6,6 @@ import bcpi.BcpiControlFlow;
 import bcpi.BcpiData;
 import bcpi.CacheCostModel;
 import bcpi.DataTypes;
-import bcpi.Field;
 import bcpi.FieldReferences;
 import bcpi.Linker;
 import bcpi.StructAbiConstraints;
@@ -601,7 +600,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			.append(" {");
 
 		Map<String, Integer> fieldIds = Arrays.stream(original.getComponents())
-			.filter(f -> !Field.isPadding(f))
+			.filter(f -> !DataTypes.isPadding(f))
 			.collect(Collectors.toMap(f -> f.getFieldName(), f -> f.getOrdinal()));
 
 		BiMap<String, Integer> rows = HashBiMap.create();
@@ -628,7 +627,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 				}
 			}
 
-			if (Field.isPadding(field)) {
+			if (DataTypes.isPadding(field)) {
 				padding += field.getLength();
 			} else {
 				addPadding(table, padding);
@@ -823,7 +822,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			out.println();
 
 			String fields = Arrays.stream(struct.getComponents())
-				.filter(f -> !Field.isPadding(f))
+				.filter(f -> !DataTypes.isPadding(f))
 				.map(f -> f.getFieldName())
 				.collect(Collectors.joining(","));
 			out.println("$ clang-reorder-fields \\");
@@ -837,11 +836,11 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			out.println();
 
 			String args = Arrays.stream(original.getComponents())
-				.filter(f -> !Field.isPadding(f))
+				.filter(f -> !DataTypes.isPadding(f))
 				.map(f -> f.getFieldName())
 				.collect(Collectors.joining(", "));
 			String body = Arrays.stream(original.getComponents())
-				.filter(f -> !Field.isPadding(f))
+				.filter(f -> !DataTypes.isPadding(f))
 				.map(f -> f.getFieldName())
 				.collect(Collectors.joining(", "));
 			out.print("#define INIT_");
