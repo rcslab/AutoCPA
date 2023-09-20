@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 /**
  * Optimizes struct layouts via a constrained hill-climbing algorithm.
@@ -65,34 +66,46 @@ public class StructLayoutOptimizer {
 		return build(layout);
 	}
 
+	private static class LayoutAndCost {
+		final Layout layout;
+		final long cost;
+
+		LayoutAndCost(Layout layout, long cost) {
+			this.layout = layout;
+			this.cost = cost;
+		}
+	}
+
+	private static final Comparator<LayoutAndCost> LOWEST_COST_FIRST = Comparator
+		.<LayoutAndCost>comparingLong(lac -> lac.cost);
+
+	/**
+	 * Calculate the cost of inserting a field at a position.
+	 */
+	private LayoutAndCost cost(Layout layout, Field field, int i) {
+		var newLayout = layout.prefix(i);
+		newLayout.add(field);
+
+		var fields = layout.getFields();
+		for (int j = i; j < fields.size(); ++j) {
+			newLayout.add(fields.get(j));
+		}
+
+		var cost = this.costModel.cost(newLayout);
+		return new LayoutAndCost(newLayout, cost);
+	}
+
 	/**
 	 * Pack a new field into a structure.
 	 */
 	private Layout pack(Layout layout, Field field) {
-		Layout best = null;
-		long bestCost = Long.MAX_VALUE;
-		int nFields = layout.getFields().size();
-		for (int i = 0; i <= nFields; ++i) {
-			var copy = layout.prefix(i);
-			copy.add(field);
-			for (var after : layout.getFields().subList(i, nFields)) {
-				copy.add(after);
-			}
+		var best = IntStream.rangeClosed(0, layout.getFields().size())
+			.parallel()
+			.mapToObj(i -> cost(layout, field, i))
+			.min(LOWEST_COST_FIRST)
+			.orElseThrow(() -> new RuntimeException("Unsatisfiable constraints for " + field));
 
-			if (this.constraints.check(copy)) {
-				var cost = this.costModel.cost(copy);
-				if (cost <= bestCost) {
-					best = copy;
-					bestCost = cost;
-				}
-			}
-		}
-
-		if (best == null) {
-			throw new RuntimeException("Unsatisfiable constraints for " + field);
-		}
-
-		return best;
+		return best.layout;
 	}
 
 	/**
