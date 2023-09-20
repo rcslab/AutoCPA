@@ -11,6 +11,7 @@ import bcpi.FieldReferences;
 import bcpi.Linker;
 import bcpi.StructAbiConstraints;
 import bcpi.StructLayoutOptimizer;
+import bcpi.type.BcpiStruct;
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
@@ -401,15 +402,16 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 		List<IndexRow> rows = patterns.getStructures()
 			.parallelStream()
 			.map(struct -> {
+				var bcpiStruct = BcpiStruct.from(struct);
 				String name = struct.getName();
 
-				StructAbiConstraints constraints = new StructAbiConstraints(struct);
+				var constraints = new StructAbiConstraints(bcpiStruct);
 				for (ConstraintArg arg : this.constraints.get(name)) {
 					arg.apply(constraints);
 				}
 
-				CacheCostModel costModel = new CacheCostModel(patterns, struct);
-				StructLayoutOptimizer optimizer = new StructLayoutOptimizer(patterns, struct, constraints, costModel);
+				CacheCostModel costModel = new CacheCostModel(patterns, bcpiStruct);
+				StructLayoutOptimizer optimizer = new StructLayoutOptimizer(patterns, bcpiStruct, constraints, costModel);
 				Structure optimized = optimizer.optimize();
 
 				Path path = structResults.resolve(sanitizeFileName(name) + ".html");
@@ -560,7 +562,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			renderAccessPatterns(before, patterns, out);
 			out.println("</div>");
 
-			CacheCostModel costModel = new CacheCostModel(patterns, before);
+			var costModel = new CacheCostModel(patterns, BcpiStruct.from(before));
 			out.println("<div class='column' style='grid-area: 1 / 2 / 2 / 3;'>");
 			long beforeCost = costModel.cost(before);
 			out.format("<p><strong>Before:</strong> %,d</p>\n", beforeCost);

@@ -1,5 +1,9 @@
 package bcpi;
 
+import bcpi.type.BcpiStruct;
+import bcpi.type.Field;
+import bcpi.type.Layout;
+
 import ghidra.program.model.data.Structure;
 
 import java.util.ArrayList;
@@ -14,93 +18,90 @@ import java.util.Set;
  */
 public class StructLayoutOptimizer {
 	private final AccessPatterns patterns;
-	private final Structure original;
+	private final BcpiStruct original;
 	private final StructAbiConstraints constraints;
-	private final CostModel<Structure> costModel;
+	private final CostModel<Layout> costModel;
 	private final int align;
 
-	public StructLayoutOptimizer(AccessPatterns patterns, Structure original, StructAbiConstraints constraints, CostModel<Structure> costModel) {
+	public StructLayoutOptimizer(AccessPatterns patterns, BcpiStruct original, StructAbiConstraints constraints, CostModel<Layout> costModel) {
 		this.patterns = patterns;
 		this.original = original;
 		this.constraints = constraints;
 		this.costModel = costModel;
-		this.align = DataTypes.getAlignment(original);
+		this.align = original.getByteAlignment();
 	}
 
 	/**
 	 * @return The optimized layout for the structure.
 	 */
 	public Structure optimize() {
-		List<Field> origFields = Field.allFields(this.original);
-		List<Field> fields = new ArrayList<>();
+		Layout layout = this.original.getLayout().emptyCopy();
 		Set<Field> added = new HashSet<>();
 
 		// Add fields with fixed positions first
-		for (Field field : origFields) {
+		for (var field : this.original.getFields()) {
 			if (this.constraints.isFixed(field)) {
-				pack(fields, field);
+				layout = pack(layout, field);
 				added.add(field);
 			}
 		}
 
 		// Then access patterns from most common to least
-		for (AccessPattern pattern : patterns.getRankedPatterns(this.original)) {
-			pattern.getLegacyFields()
-				.stream()
-				.filter(f -> !added.contains(f))
-				.sorted(Comparator.comparingInt(f -> f.getOrdinal()))
-				.forEach(f -> pack(fields, f));
-
-			added.addAll(pattern.getLegacyFields());
+		for (var pattern : patterns.getRankedPatterns(this.original)) {
+			for (var field : pattern.getFields()) {
+				if (added.add(field)) {
+					layout = pack(layout, field);
+				}
+			}
 		}
 
 		// Add any missing fields we didn't see
-		origFields
-			.stream()
-			.filter(f -> !added.contains(f))
-			.forEach(f -> pack(fields, f));
+		for (var field : this.original.getFields()) {
+			if (added.add(field)) {
+				layout = pack(layout, field);
+			}
+		}
 
-		return build(fields);
+		return build(layout);
 	}
 
 	/**
 	 * Pack a new field into a structure.
 	 */
-	private void pack(List<Field> fields, Field field) {
-		fields.add(field);
+	private Layout pack(Layout layout, Field field) {
+		Layout best = null;
+		long bestCost = Long.MAX_VALUE;
+		int nFields = layout.getFields().size();
+		for (int i = 0; i <= nFields; ++i) {
+			var copy = layout.prefix(i);
+			copy.add(field);
+			for (var after : layout.getFields().subList(i, nFields)) {
+				copy.add(after);
+			}
 
-		int bestI = -1;
-		long bestCost = -1;
-		for (int i = fields.size() - 1; ; --i) {
-			if (this.constraints.check(fields)) {
-				long newCost = this.costModel.cost(build(fields));
-				if (bestI < 0 || newCost < bestCost) {
-					bestI = i;
-					bestCost = newCost;
+			if (this.constraints.check(copy)) {
+				var cost = this.costModel.cost(copy);
+				if (cost <= bestCost) {
+					best = copy;
+					bestCost = cost;
 				}
 			}
-
-			if (i == 0) {
-				break;
-			}
-			Collections.swap(fields, i - 1, i);
 		}
 
-		if (bestI < 0) {
+		if (best == null) {
 			throw new RuntimeException("Unsatisfiable constraints for " + field);
 		}
 
-		// The new field will be at index zero.  Rotate it into place.
-		Collections.rotate(fields.subList(0, bestI + 1), -1);
+		return best;
 	}
 
 	/**
 	 * Make a copy of a structure with reordered fields.
 	 */
-	private Structure build(List<Field> fields) {
-		Structure result = DataTypes.emptyStructLike(this.original);
-		for (Field field : fields) {
-			field.copyTo(result);
+	private Structure build(Layout layout) {
+		Structure result = DataTypes.emptyStructLike(this.original.toGhidra());
+		for (var field : layout.getFields()) {
+			DataTypes.addField(result, field.toGhidra());
 		}
 		DataTypes.padTail(result, this.align);
 		return result;

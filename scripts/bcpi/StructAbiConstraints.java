@@ -1,75 +1,70 @@
 package bcpi;
 
-import ghidra.program.model.data.Structure;
+import bcpi.type.BcpiStruct;
+import bcpi.type.Field;
+import bcpi.type.Layout;
 
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
  * ABI constraints on struct layouts.
  */
 public class StructAbiConstraints {
-	private final Structure struct;
 	private final List<Field> fields;
-	private final Map<String, Integer> indices;
+	private final Map<String, Field> map;
 	private final int[] fixed;
 	private final int[] groups;
 	private final BitSet[] groupOrdering;
 
-	public StructAbiConstraints(Structure struct) {
-		this.struct = struct;
-		this.fields = Field.allFields(struct);
+	public StructAbiConstraints(BcpiStruct struct) {
+		this.fields = struct.getFields();
 
-		int nFields = this.fields.size();
-		this.indices = IntStream.range(0, nFields)
-			.boxed()
-			.collect(Collectors.toMap(i -> this.fields.get(i).getFieldName(), i -> i));
-
+		var nFields = this.fields.size();
+		this.map = new HashMap<>();
 		this.fixed = new int[nFields];
-		for (int i = 0; i < nFields; ++i) {
-			if (this.fields.get(i).isSuperClass()) {
-				this.fixed[i] = i;
-			} else {
-				this.fixed[i] = -1;
-			}
-		}
-
 		this.groups = new int[nFields];
+		this.groupOrdering = new BitSet[nFields];
+		Arrays.fill(this.fixed, -1);
 		Arrays.fill(this.groups, -1);
 
-		this.groupOrdering = new BitSet[nFields];
+		for (int i = 0; i < nFields; ++i) {
+			var field = this.fields.get(i);
+			var name = field.getName();
+			this.map.put(name, field);
+
+			// TODO: Ghidra should expose something more reliable
+			if (name.startsWith("super_")) {
+				this.fixed[i] = i;
+			}
+		}
 	}
 
-	private int getIndex(String field) {
-		int index = this.indices.getOrDefault(field, -1);
-		if (index < 0) {
+	private int getIndex(String name) {
+		var field = this.map.get(name);
+		if (field == null) {
 			throw new IllegalArgumentException("No such field " + field);
 		}
-		return index;
-	}
-
-	private int getIndex(Field field) {
-		return getIndex(field.getFieldName());
+		return field.getOriginalIndex();
 	}
 
 	private void setGroup(int index, int group) {
 		int prev = this.groups[index];
 		if (prev != -1) {
-			Field field = this.fields.get(index);
+			var field = this.fields.get(index);
 			throw new IllegalArgumentException(String.format("Conflicting groups %d and %d for %s", prev, group, field));
 		}
 		this.groups[index] = group;
 	}
 
 	/** Set the group constraint for a field. */
-	public void setGroup(String field, int group) {
+	public void setGroup(String name, int group) {
 		Objects.checkIndex(group, this.groupOrdering.length);
-		setGroup(getIndex(field), group);
+		setGroup(getIndex(name), group);
 	}
 
 	/** Set the group constraint for a range of fields. */
@@ -96,8 +91,8 @@ public class StructAbiConstraints {
 	}
 
 	/** Set a fixed position for a field. */
-	public void setFixed(String field, int index) {
-		int i = getIndex(field);
+	public void setFixed(String name, int index) {
+		int i = getIndex(name);
 		this.fixed[i] = index;
 	}
 
@@ -105,18 +100,18 @@ public class StructAbiConstraints {
 	 * @return Whether the given field has its position fixed.
 	 */
 	public boolean isFixed(Field field) {
-		return this.fixed[getIndex(field)] >= 0;
+		return this.fixed[field.getOriginalIndex()] >= 0;
 	}
 
 	/**
-	 * @return Whether this field order satisfies the constraints.
+	 * @return Whether this layout satisfies the constraints.
 	 */
-	public boolean check(List<Field> fields) {
-		if (!checkFixed(fields)) {
+	public boolean check(Layout layout) {
+		if (!checkFixed(layout)) {
 			return false;
 		}
 
-		if (!checkGroups(fields)) {
+		if (!checkGroups(layout)) {
 			return false;
 		}
 
@@ -124,11 +119,10 @@ public class StructAbiConstraints {
 	}
 
 	/** Check fixed field constraints. */
-	private boolean checkFixed(List<Field> fields) {
-		for (int i = 0; i < fields.size(); ++i) {
-			Field field = fields.get(i);
-			int expected = this.fixed[getIndex(field)];
-			if (expected >= 0 && i != expected) {
+	private boolean checkFixed(Layout layout) {
+		for (var field : layout.getFields()) {
+			int expected = this.fixed[field.getOriginalIndex()];
+			if (expected >= 0 && field.getIndex() != expected) {
 				return false;
 			}
 		}
@@ -137,7 +131,8 @@ public class StructAbiConstraints {
 	}
 
 	/** Check group constraints. */
-	private boolean checkGroups(List<Field> fields) {
+	private boolean checkGroups(Layout layout) {
+		var fields = layout.getFields();
 		var groups = new int[fields.size()];
 		for (int i = 0; i < groups.length; ++i) {
 			groups[i] = getGroup(fields.get(i));
@@ -172,7 +167,7 @@ public class StructAbiConstraints {
 	}
 
 	private int getGroup(Field field) {
-		return this.groups[getIndex(field)];
+		return this.groups[field.getOriginalIndex()];
 	}
 
 	/** Check the relative order of two groups. */
