@@ -10,6 +10,7 @@ import ghidra.program.model.data.Enum;
 import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.TypeDef;
 import ghidra.program.model.data.Union;
 
 /**
@@ -67,6 +68,8 @@ class BcpiTypeCache {
 			return new BcpiPointer(t);
 		} else if (type instanceof Structure t) {
 			return new BcpiStruct(t);
+		} else if (type instanceof TypeDef t) {
+			return new BcpiTypeDef(t);
 		} else if (type instanceof Union t) {
 			return new BcpiUnion(t);
 		} else {
