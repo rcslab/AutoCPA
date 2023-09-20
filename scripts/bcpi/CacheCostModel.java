@@ -10,7 +10,7 @@ import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * A cost model for field accesses based on accessed cache lines.
@@ -20,11 +20,14 @@ public class CacheCostModel implements CostModel<Layout> {
 
 	private final AccessPatterns patterns;
 	private final BcpiStruct original;
+	private final List<AccessPattern> rankedPatterns;
 	private final int align;
+	private final int nOffsets;
 
 	public CacheCostModel(AccessPatterns patterns, BcpiStruct original) {
 		this.patterns = patterns;
 		this.original = original;
+		this.rankedPatterns = patterns.getRankedPatterns(original);
 
 		if (BcpiConfig.ASSUME_CACHE_ALIGNED) {
 			this.align = CACHE_LINE;
@@ -36,6 +39,8 @@ public class CacheCostModel implements CostModel<Layout> {
 			align = Math.min(align, CACHE_LINE);
 			this.align = align;
 		}
+
+		this.nOffsets = CACHE_LINE / this.align;
 	}
 
 	/**
@@ -60,52 +65,67 @@ public class CacheCostModel implements CostModel<Layout> {
 		return bytePerm;
 	}
 
+	/**
+	 * @return The weighted cost for the given offset.
+	 */
+	private long weightedCost(long cost, int offset) {
+                // As a heuristic, assume offset zero is twice as likely as the next possible
+                // offset, which is twice as likely as the next one, etc.
+		return cost << (this.nOffsets - offset - 1);
+	}
+
+	/**
+	 * @return The total weight of all offsets.
+	 */
+	private long totalWeight() {
+		return (1L << this.nOffsets) - 1;
+	}
+
+	/**
+	 * Calculate the cost for a structure at a particular cache line offset.
+	 */
+	private long costAtOffset(int offset, int[] bytePerm) {
+		int byteOffset = offset * this.align;
+
+		// For each offset, the cost is the cumulative number of cache lines touched
+		// up to the current pattern, weighted by the pattern's observation count.
+		// You can think of this like the area under the (pattern, cache lines) curve.
+		var touchedLines = new BitSet();
+		long cost = 0;
+
+		for (var pattern : this.rankedPatterns) {
+			long count = this.patterns.getCount(pattern);
+
+			pattern.getBytes()
+				.stream()
+				.map(b -> bytePerm[b])
+				.filter(b -> b >= 0)
+				.forEach(b -> touchedLines.set((byteOffset + b) / CACHE_LINE));
+
+			cost += count * touchedLines.cardinality();
+
+			if (!touchedLines.get(0)) {
+				// Break ties by slightly preferring the first cache line
+				cost += 1;
+			}
+		}
+
+		return weightedCost(cost, offset);
+	}
+
 	@Override
 	public long cost(Layout layout) {
 		int[] bytePerm = getBytePermutation(layout);
 
-		// As a heuristic, assume offset zero is twice as likely as the next possible
-		// offset, which is twice as likely as the next one, etc.
-		int nOffsets = CACHE_LINE / this.align;
-		long totalWeight = (1L << nOffsets) - 1;
-		int nCacheLines = 1 + (layout.getByteSize() + CACHE_LINE - 1) / CACHE_LINE;
-		BitSet touchedLines = new BitSet(nCacheLines);
-
 		// Compute the expected cost over the possible cache line offsets
-		long total = 0;
-		int weightShift = nOffsets;
-		for (int i = 0; i < nOffsets; ++i) {
-			int offset = i * this.align;
-
-			// For each offset, the cost is the cumulative number of cache lines touched
-			// up to the current pattern, weighted by the pattern's observation count.
-			// You can think of this like the area under the (pattern, cache lines) curve.
-			touchedLines.clear();
-
-			long cost = 0;
-			for (AccessPattern pattern : this.patterns.getRankedPatterns(this.original)) {
-				long count = this.patterns.getCount(pattern);
-
-				pattern.getBytes()
-					.stream()
-					.map(j -> bytePerm[j])
-					.filter(j -> j >= 0)
-					.forEach(j -> touchedLines.set((offset + j) / CACHE_LINE));
-
-				cost += count * touchedLines.cardinality();
-
-				if (touchedLines.get(0)) {
-					// Break ties by slightly preferring the first cache line
-					cost -= 1;
-				}
-			}
-
-			--weightShift;
-			total += cost << weightShift;
-		}
+		long cost = IntStream.range(0, this.nOffsets)
+			.parallel()
+			.mapToLong(i -> costAtOffset(i, bytePerm))
+			.sum();
 
 		// Normalize the score
-		long cost = (total + totalWeight - 1) / totalWeight;
+		long weight = totalWeight();
+		cost = (cost + weight - 1) / weight;
 
 		// Penalize internal padding
 		cost += layout.getInternalPaddingBytes();
