@@ -7,6 +7,7 @@ import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypePath;
 import ghidra.program.model.data.Enum;
+import ghidra.program.model.data.FunctionDefinition;
 
 /**
  * Cached BCPI type conversions.
@@ -57,6 +58,8 @@ class BcpiTypeCache {
 			return new BcpiBitField(t);
 		} else if (type instanceof Enum t) {
 			return new BcpiEnum(t);
+		} else if (type instanceof FunctionDefinition t) {
+			return new BcpiFunctionType(t);
 		} else {
 			return new BcpiPrimitive(type);
 		}
