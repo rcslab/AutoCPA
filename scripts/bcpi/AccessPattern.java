@@ -122,13 +122,13 @@ public class AccessPattern {
 	public AccessPattern project(Field field) {
 		checkFieldParent(field);
 
-		var type = field.getType().resolve();
 		int start = field.getStartByte();
-		int end = start + type.getByteSize();
+		int end = field.getEndByte();
 		BitSet read = this.read.get(start, end);
 		BitSet written = this.written.get(start, end);
 
 		// Unwrap arrays and merge accesses to different elements
+		var type = field.getType().resolve();
 		while (type instanceof BcpiArray) {
 			var array = (BcpiArray)type;
 			type = array.unwrap().resolve();

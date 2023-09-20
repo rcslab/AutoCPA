@@ -3,6 +3,7 @@ package bcpi;
 import bcpi.dataflow.BcpiDomain;
 import bcpi.dataflow.BcpiVarDomain;
 import bcpi.dataflow.DataFlow;
+import bcpi.type.BcpiType;
 import bcpi.util.Counter;
 
 import ghidra.program.model.address.Address;
@@ -129,7 +130,7 @@ public class PcodeFormatter {
 		var spec = new StringBuilder();
 		var prefix = new StringBuilder();
 		var suffix = new StringBuilder();
-		DataTypes.formatCDecl(type, spec, prefix, suffix);
+		BcpiType.from(type).toC(spec, prefix, suffix);
 		Tty.print("<fg=red>%s %s</fg><fg=blue>%s</fg><fg=red>%s</fg>", spec, prefix, name, suffix);
 	}
 

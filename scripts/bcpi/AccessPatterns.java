@@ -5,7 +5,6 @@ import bcpi.util.Counter;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
-import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.util.Msg;
 
@@ -139,13 +138,6 @@ public class AccessPatterns {
 		return Collections.unmodifiableSet(this.patterns.keySet());
 	}
 
-	public Set<Structure> getStructures() {
-		return getStructs()
-			.stream()
-			.map(BcpiStruct::toGhidra)
-			.collect(Collectors.toSet());
-	}
-
 	/**
 	 * @return All the access patterns we saw for a structure, from most to least often.
 	 */
@@ -159,10 +151,6 @@ public class AccessPatterns {
 			.collect(Collectors.toList());
 	}
 
-	public List<AccessPattern> getRankedPatterns(Structure struct) {
-		return getRankedPatterns(BcpiStruct.from(struct));
-	}
-
 	/**
 	 * @return The total number of accesses to a struct.
 	 */
@@ -172,10 +160,6 @@ public class AccessPatterns {
 			.stream()
 			.mapToLong(this::getCount)
 			.sum();
-	}
-
-	public long getCount(Structure struct) {
-		return getCount(BcpiStruct.from(struct));
 	}
 
 	/**

@@ -4,8 +4,6 @@ import bcpi.type.BcpiStruct;
 import bcpi.type.Field;
 import bcpi.type.Layout;
 
-import ghidra.program.model.data.Structure;
-
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
@@ -131,9 +129,5 @@ public class CacheCostModel implements CostModel<Layout> {
 		cost += layout.getInternalPaddingBytes();
 
 		return cost;
-	}
-
-	public long cost(Structure struct) {
-		return cost(BcpiStruct.from(struct).getLayout());
 	}
 }

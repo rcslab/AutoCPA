@@ -4,8 +4,6 @@ import bcpi.type.BcpiStruct;
 import bcpi.type.Field;
 import bcpi.type.Layout;
 
-import ghidra.program.model.data.Structure;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -35,7 +33,7 @@ public class StructLayoutOptimizer {
 	/**
 	 * @return The optimized layout for the structure.
 	 */
-	public Structure optimize() {
+	public Layout optimize() {
 		Layout layout = this.original.getLayout().emptyCopy();
 		Set<Field> added = new HashSet<>();
 
@@ -63,7 +61,7 @@ public class StructLayoutOptimizer {
 			}
 		}
 
-		return build(layout);
+		return layout;
 	}
 
 	private static class LayoutAndCost {
@@ -106,17 +104,5 @@ public class StructLayoutOptimizer {
 			.orElseThrow(() -> new RuntimeException("Unsatisfiable constraints for " + field));
 
 		return best.layout;
-	}
-
-	/**
-	 * Make a copy of a structure with reordered fields.
-	 */
-	private Structure build(Layout layout) {
-		Structure result = DataTypes.emptyStructLike(this.original.toGhidra());
-		for (var field : layout.getFields()) {
-			DataTypes.addField(result, field.toGhidra());
-		}
-		DataTypes.padTail(result, this.align);
-		return result;
 	}
 }
