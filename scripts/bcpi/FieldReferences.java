@@ -170,7 +170,6 @@ public class FieldReferences {
 		if (!(type instanceof BcpiAggregate)) {
 			return;
 		}
-		var aggType = (BcpiAggregate)type;
 
 		int offset = facts.getOffset().getAsInt();
 		int size = value.getSize();
@@ -179,6 +178,6 @@ public class FieldReferences {
 		}
 
 		updateFields(op.getSeqnum().getTarget())
-			.add(new FieldReference(aggType.toGhidra(), facts.isMaybeArray(), offset, size, isRead));
+			.add(new FieldReference((BcpiAggregate)type, facts.isMaybeArray(), offset, size, isRead));
 	}
 }

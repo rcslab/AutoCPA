@@ -72,7 +72,7 @@ public class AccessPatterns {
 				}
 
 				for (FieldReference ref : this.refs.getFields(address)) {
-					Composite type = ref.getOuterType();
+					Composite type = ref.getOuterType().toGhidra();
 					if (type instanceof Structure) {
 						(ref.isRead() ? reads : writes)
 							.computeIfAbsent((Structure) type, k -> new BitSet())
