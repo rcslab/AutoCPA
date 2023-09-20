@@ -3,6 +3,7 @@ package bcpi.type;
 import bcpi.util.Cache;
 
 import ghidra.program.model.data.Array;
+import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypePath;
 
@@ -51,6 +52,8 @@ class BcpiTypeCache {
 		var type = key.type;
 		if (type instanceof Array t) {
 			return new BcpiArray(t);
+		} else if (type instanceof BitFieldDataType t) {
+			return new BcpiBitField(t);
 		} else {
 			return new BcpiPrimitive(type);
 		}
