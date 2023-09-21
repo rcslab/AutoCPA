@@ -10,6 +10,7 @@ import bcpi.Linker;
 import bcpi.StructAbiConstraints;
 import bcpi.StructLayoutOptimizer;
 import bcpi.type.BcpiStruct;
+import bcpi.type.BcpiType;
 import bcpi.type.Field;
 import bcpi.type.Layout;
 
@@ -41,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -220,6 +223,9 @@ class FixedFieldConstraint implements ConstraintArg {
  */
 public class StructOrderAnalysis extends BcpiAnalysis {
 	private ListMultimap<String, ConstraintArg> constraints = ArrayListMultimap.create();
+	private final ConcurrentMap<BcpiType, Path> typePaths = new ConcurrentHashMap<>();
+	private final Set<String> typeNames = ConcurrentHashMap.newKeySet();
+	private Path resultsPath;
 	private long time;
 
 	private void timerMsg(String msg) {
@@ -281,8 +287,8 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 		timerMsg("Collecting access patterns");
 
 		String name = getState().getProject().getName();
-		Path results = Paths.get("./results").resolve(name);
-		render(patterns, results);
+		this.resultsPath = Paths.get("results").resolve(name);
+		render(patterns);
 		timerMsg("Optimizing structures");
 	}
 
@@ -296,11 +302,28 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			result = result.substring(0, 32);
 		}
 
-		if (!result.equals(name)) {
-			result += "_" + Integer.toHexString(name.hashCode());
-		}
-
 		return result;
+	}
+
+	/**
+	 * Get the result path for a type.
+	 */
+	private Path getResultPath(BcpiType type) {
+		var path = this.resultsPath.resolve("structs");
+
+		return this.typePaths.computeIfAbsent(type, k -> {
+			var name = sanitizeFileName(type.getName());
+			if (this.typeNames.add(name)) {
+				return path.resolve(name + ".html");
+			}
+
+			for (int i = 1; ; ++i) {
+				var uniq = name + "_" + i;
+				if (this.typeNames.add(uniq)) {
+					return path.resolve(uniq + ".html");
+				}
+			}
+		});
 	}
 
 	/**
@@ -387,11 +410,11 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	/**
 	 * Render all structures to HTML.
 	 */
-	private void render(AccessPatterns patterns, Path results) throws Exception {
+	private void render(AccessPatterns patterns) throws Exception {
 		var structs = patterns.getStructs();
 		Msg.info(this, String.format("Optimizing %,d structures", structs.size()));
 
-		Path structResults = results.resolve("structs");
+		Path structResults = this.resultsPath.resolve("structs");
 		Files.createDirectories(structResults);
 
 		List<IndexRow> rows = structs
@@ -408,11 +431,11 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 				var optimizer = new StructLayoutOptimizer(patterns, struct, constraints, costModel);
 				var optimized = optimizer.optimize();
 
-				Path path = structResults.resolve(sanitizeFileName(name) + ".html");
+				var path = getResultPath(struct);
 				renderStruct(struct, optimized, patterns, path);
 
 				String text = struct.toC();
-				String href = results.relativize(path).toString();
+				String href = this.resultsPath.relativize(path).toString();
 				long nSamples = patterns.getCount(struct);
 				long before = costModel.cost(struct.getLayout());
 				long after = costModel.cost(optimized);
@@ -440,7 +463,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			row.costPercent = percent(row.cost, totalCost);
 		}
 
-		Path index = results.resolve("index.html");
+		Path index = this.resultsPath.resolve("index.html");
 		try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(index))) {
 			out.println("<!DOCTYPE html>");
 			out.println("<html>");
@@ -736,8 +759,9 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 					var origField = struct.getFields().get(fieldIds.get(field));
 					var type = origField.getType().fullyUndecorate().resolve();
 					if (patterns.getStructs().contains(type)) {
-						String href = sanitizeFileName(type.getName());
-						typeCell.insert(1, "<a href='" + href + ".html'>")
+						var path = getResultPath(type);
+						String href = path.getFileName().toString();
+						typeCell.insert(1, "<a href='" + href + "'>")
 							.append("</a>");
 					}
 				}
