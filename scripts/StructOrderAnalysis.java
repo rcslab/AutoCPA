@@ -5,20 +5,16 @@ import bcpi.BcpiConfig;
 import bcpi.BcpiControlFlow;
 import bcpi.BcpiData;
 import bcpi.CacheCostModel;
-import bcpi.DataTypes;
-import bcpi.Field;
 import bcpi.FieldReferences;
 import bcpi.Linker;
 import bcpi.StructAbiConstraints;
 import bcpi.StructLayoutOptimizer;
+import bcpi.type.BcpiStruct;
+import bcpi.type.BcpiType;
+import bcpi.type.Field;
+import bcpi.type.Layout;
 
 import ghidra.app.script.GhidraScript;
-import ghidra.framework.model.DomainFile;
-import ghidra.framework.model.DomainFolder;
-import ghidra.framework.model.DomainObject;
-import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
@@ -33,6 +29,7 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.html.HtmlEscapers;
 
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -45,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -224,14 +223,29 @@ class FixedFieldConstraint implements ConstraintArg {
  */
 public class StructOrderAnalysis extends BcpiAnalysis {
 	private ListMultimap<String, ConstraintArg> constraints = ArrayListMultimap.create();
+	private final ConcurrentMap<BcpiType, Path> typePaths = new ConcurrentHashMap<>();
+	private final Set<String> typeNames = ConcurrentHashMap.newKeySet();
+	private Path resultsPath;
+	private long time;
+
+	private void timerMsg(String msg) {
+		long now = System.currentTimeMillis();
+		Msg.info(this, String.format("%s took %,d ms", msg, now - time));
+		this.time = now;
+	}
 
 	@Override
 	protected void analyze(String[] args) throws Exception {
+		long uptime = ManagementFactory.getRuntimeMXBean().getUptime();
+		this.time = System.currentTimeMillis() - uptime;
+		timerMsg("Starting analysis");
+
 		var ctx = getContext();
 
 		// Read address_info.csv to find relevant addresses
 		Path csv = Paths.get(args[0]);
 		BcpiData data = BcpiData.parse(csv, ctx);
+		timerMsg("Parsing data");
 
 		// Process command line arguments
 		for (int i = 1; i < args.length; ++i) {
@@ -259,19 +273,23 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 
 		BcpiControlFlow cfgs = new BcpiControlFlow(ctx);
 		cfgs.addCoverage(data);
+		timerMsg("Adding coverage");
 
 		FieldReferences refs = new FieldReferences(ctx, cfgs);
 		refs.collect(funcs);
+		timerMsg("Computing data flow");
 
 		// Use our collected data to infer field access patterns
 		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
 		patterns.collect(data);
 		double hitRate = 100.0 * patterns.getHitRate();
 		Msg.info(this, String.format("Found patterns for %.2f%% of samples", hitRate));
+		timerMsg("Collecting access patterns");
 
 		String name = getState().getProject().getName();
-		Path results = Paths.get("./results").resolve(name);
-		render(patterns, results);
+		this.resultsPath = Paths.get("results").resolve(name);
+		render(patterns);
+		timerMsg("Optimizing structures");
 	}
 
 	/**
@@ -284,11 +302,28 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			result = result.substring(0, 32);
 		}
 
-		if (!result.equals(name)) {
-			result += "_" + Integer.toHexString(name.hashCode());
-		}
-
 		return result;
+	}
+
+	/**
+	 * Get the result path for a type.
+	 */
+	private Path getResultPath(BcpiType type) {
+		var path = this.resultsPath.resolve("structs");
+
+		return this.typePaths.computeIfAbsent(type, k -> {
+			var name = sanitizeFileName(type.getName());
+			if (this.typeNames.add(name)) {
+				return path.resolve(name + ".html");
+			}
+
+			for (int i = 1; ; ++i) {
+				var uniq = name + "_" + i;
+				if (this.typeNames.add(uniq)) {
+					return path.resolve(uniq + ".html");
+				}
+			}
+		});
 	}
 
 	/**
@@ -375,33 +410,34 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	/**
 	 * Render all structures to HTML.
 	 */
-	private void render(AccessPatterns patterns, Path results) throws Exception {
-		Msg.info(this, String.format("Optimizing %,d structures", patterns.getStructures().size()));
+	private void render(AccessPatterns patterns) throws Exception {
+		var structs = patterns.getStructs();
+		Msg.info(this, String.format("Optimizing %,d structures", structs.size()));
 
-		Path structResults = results.resolve("structs");
+		Path structResults = this.resultsPath.resolve("structs");
 		Files.createDirectories(structResults);
 
-		List<IndexRow> rows = patterns.getStructures()
+		List<IndexRow> rows = structs
 			.parallelStream()
 			.map(struct -> {
 				String name = struct.getName();
 
-				StructAbiConstraints constraints = new StructAbiConstraints(struct);
-				for (ConstraintArg arg : this.constraints.get(name)) {
+				var constraints = new StructAbiConstraints(struct);
+				for (var arg : this.constraints.get(name)) {
 					arg.apply(constraints);
 				}
 
-				CacheCostModel costModel = new CacheCostModel(patterns, struct);
-				StructLayoutOptimizer optimizer = new StructLayoutOptimizer(patterns, struct, constraints, costModel);
-				Structure optimized = optimizer.optimize();
+				var costModel = new CacheCostModel(patterns, struct);
+				var optimizer = new StructLayoutOptimizer(patterns, struct, constraints, costModel);
+				var optimized = optimizer.optimize();
 
-				Path path = structResults.resolve(sanitizeFileName(name) + ".html");
-				renderStructs(struct, optimized, patterns, path);
+				var path = getResultPath(struct);
+				renderStruct(struct, optimized, patterns, path);
 
-				String text = DataTypes.formatCDecl(struct);
-				String href = results.relativize(path).toString();
+				String text = struct.toC();
+				String href = this.resultsPath.relativize(path).toString();
 				long nSamples = patterns.getCount(struct);
-				long before = costModel.cost(struct);
+				long before = costModel.cost(struct.getLayout());
 				long after = costModel.cost(optimized);
 				long improvement = before - after;
 				return new IndexRow(text, href, nSamples, before, improvement);
@@ -427,7 +463,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			row.costPercent = percent(row.cost, totalCost);
 		}
 
-		Path index = results.resolve("index.html");
+		Path index = this.resultsPath.resolve("index.html");
 		try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(index))) {
 			out.println("<!DOCTYPE html>");
 			out.println("<html>");
@@ -473,13 +509,13 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	/**
 	 * Render the pre- and post-optimization structure layouts to HTML.
 	 */
-	private void renderStructs(Structure before, Structure after, AccessPatterns patterns, Path path) {
+	private void renderStruct(BcpiStruct struct, Layout optimized, AccessPatterns patterns, Path path) {
 		try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(path))) {
 			out.println("<!DOCTYPE html>");
 			out.println("<html>");
 
 			out.println("<head>");
-			String structName = htmlEscape(before.getName());
+			String structName = htmlEscape(struct.getName());
 			String projectName = getState().getProject().getName();
 			out.println("<title>struct " + structName + " - " + projectName + " - BCPI</title>");
 			out.println("<style>");
@@ -540,22 +576,22 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 
 			out.println("<div class='column' style='grid-area: 1 / 1 / 2 / 2;'>");
 			out.println("<p><strong>Access patterns:</strong></p>");
-			renderAccessPatterns(before, patterns, out);
+			renderAccessPatterns(struct, patterns, out);
 			out.println("</div>");
 
-			CacheCostModel costModel = new CacheCostModel(patterns, before);
+			var costModel = new CacheCostModel(patterns, struct);
 			out.println("<div class='column' style='grid-area: 1 / 2 / 2 / 3;'>");
-			long beforeCost = costModel.cost(before);
+			long beforeCost = costModel.cost(struct.getLayout());
 			out.format("<p><strong>Before:</strong> %,d</p>\n", beforeCost);
-			renderStruct(before, before, patterns, out);
+			renderLayout(struct, struct.getLayout(), patterns, out);
 			out.println("</div>");
 
 			out.println("<div class='column' style='grid-area: 1 / 3 / 2 / 4;'>");
-			long afterCost = costModel.cost(after);
+			long afterCost = costModel.cost(optimized);
 			long improvement = afterCost - beforeCost;
 			int percentage = percent(improvement, beforeCost);
 			out.format("<p><strong>After:</strong> %,d (%+,d; %+d%%)</p>\n", afterCost, improvement, percentage);
-			renderStruct(before, after, patterns, out);
+			renderLayout(struct, optimized, patterns, out);
 			out.println("</div>");
 
 			out.println("</main>");
@@ -571,28 +607,31 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	/**
 	 * Render a structure layout to HTML.
 	 */
-	private void renderStruct(Structure original, Structure struct, AccessPatterns patterns, PrintWriter out) {
+	private void renderLayout(BcpiStruct struct, Layout layout, AccessPatterns patterns, PrintWriter out) {
 		Table table = new Table();
 		table.addColumn(); // Field type
 		table.addColumn(); // Field name
 
 		table.addRow();
 		table.get(0, 0)
-			.append(DataTypes.formatCDecl(struct))
+			.append(struct.toC())
 			.append(" {");
 
-		Map<String, Integer> fieldIds = Arrays.stream(original.getComponents())
-			.filter(f -> !Field.isPadding(f))
-			.collect(Collectors.toMap(f -> f.getFieldName(), f -> f.getOrdinal()));
+		Map<String, Integer> fieldIds = layout
+			.getFields()
+			.stream()
+			.collect(Collectors.toMap(f -> f.getName(), f -> f.getOriginalIndex()));
 
 		BiMap<String, Integer> rows = HashBiMap.create();
-		int padding = 0;
+		int lastByte = 0;
 		int lastCacheLine = -1;
-		for (DataTypeComponent field : struct.getComponents()) {
-			int cacheLine = field.getOffset() / 64;
+		for (var field : layout.getFields()) {
+			int startByte = field.getStartByte();
+			addPadding(table, startByte - lastByte);
+			lastByte = field.getEndByte();
+
+			int cacheLine = startByte / 64;
 			if (cacheLine != lastCacheLine) {
-				addPadding(table, padding);
-				padding = 0;
 				lastCacheLine = cacheLine;
 
 				int row = table.addRow();
@@ -600,7 +639,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 					.append("\t// Cache line ")
 					.append(cacheLine);
 
-				int offset = field.getOffset() % 64;
+				int offset = startByte % 64;
 				if (offset != 0) {
 					table.get(row, 1)
 						.append("(offset ")
@@ -609,17 +648,10 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 				}
 			}
 
-			if (Field.isPadding(field)) {
-				padding += field.getLength();
-			} else {
-				addPadding(table, padding);
-				padding = 0;
-
-				int row = addField(table, field);
-				rows.put(field.getFieldName(), row);
-			}
+			int row = addField(table, field);
+			rows.put(field.getName(), row);
 		}
-		addPadding(table, padding);
+		addPadding(table, layout.getByteSize() - lastByte);
 
 		// Correct alignment from
 		//
@@ -654,11 +686,11 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			table.get(row, commentCol).append("//");
 		}
 
-		List<AccessPattern> structPatterns = patterns.getRankedPatterns(original);
+		List<AccessPattern> structPatterns = patterns.getRankedPatterns(struct);
 		SetMultimap<String, Integer> fieldPatterns = HashMultimap.create();
 		SetMultimap<Integer, Integer> colPatterns = HashMultimap.create();
 		int count = 0;
-		long total = patterns.getCount(original);
+		long total = patterns.getCount(struct);
 		final int MAX_COLS = 7;
 		for (AccessPattern pattern : structPatterns) {
 			int patternId = count++;
@@ -679,21 +711,19 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 					.replace(0, 3, "...");
 			}
 
-			for (Field field : pattern.getFields()) {
+			for (var field : pattern.getFields()) {
 				boolean read = pattern.reads(field);
 				boolean written = pattern.writes(field);
 
-				for (DataTypeComponent component : field.getComponents()) {
-					String name = component.getFieldName();
-					fieldPatterns.put(name, patternId);
+				String name = field.getName();
+				fieldPatterns.put(name, patternId);
 
-					StringBuilder str = table.get(rows.get(name), col);
-					if (col < MAX_COLS) {
-						str.append(read ? "R" : " ");
-						str.append(written ? "W" : " ");
-					} else {
-						str.replace(0, 3, "...");
-					}
+				StringBuilder str = table.get(rows.get(name), col);
+				if (col < MAX_COLS) {
+					str.append(read ? "R" : " ");
+					str.append(written ? "W" : " ");
+				} else {
+					str.replace(0, 3, "...");
 				}
 			}
 		}
@@ -726,13 +756,12 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 
 				// If the field type is a known struct, link it
 				if (field != null) {
-					DataTypeComponent component = original.getComponent(fieldIds.get(field));
-					DataType type = DataTypes.undecorate(component.getDataType());
-					type = DataTypes.resolve(type);
-					type = DataTypes.dedup(type);
-					if (patterns.getStructures().contains(type)) {
-						String href = sanitizeFileName(type.getName());
-						typeCell.insert(1, "<a href='" + href + ".html'>")
+					var origField = struct.getFields().get(fieldIds.get(field));
+					var type = origField.getType().fullyUndecorate().resolve();
+					if (patterns.getStructs().contains(type)) {
+						var path = getResultPath(type);
+						String href = path.getFileName().toString();
+						typeCell.insert(1, "<a href='" + href + "'>")
 							.append("</a>");
 					}
 				}
@@ -796,7 +825,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 		out.print(table);
 		out.println("};");
 
-		if (struct != original) {
+		if (!layout.equals(struct.getLayout())) {
 			out.println();
 			out.print("<div class='comment' style='overflow-x: scroll;'>");
 			out.println("/*");
@@ -805,9 +834,9 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			out.println("clang-reorder-fields command:");
 			out.println();
 
-			String fields = Arrays.stream(struct.getComponents())
-				.filter(f -> !Field.isPadding(f))
-				.map(f -> f.getFieldName())
+			String fields = layout.getFields()
+				.stream()
+				.map(Field::getName)
 				.collect(Collectors.joining(","));
 			out.println("$ clang-reorder-fields \\");
 			out.print("\t--record-name=");
@@ -819,13 +848,13 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			out.println("Initializer macro:");
 			out.println();
 
-			String args = Arrays.stream(original.getComponents())
-				.filter(f -> !Field.isPadding(f))
-				.map(f -> f.getFieldName())
+			String args = struct.getFields()
+				.stream()
+				.map(Field::getName)
 				.collect(Collectors.joining(", "));
-			String body = Arrays.stream(original.getComponents())
-				.filter(f -> !Field.isPadding(f))
-				.map(f -> f.getFieldName())
+			String body = layout.getFields()
+				.stream()
+				.map(Field::getName)
 				.collect(Collectors.joining(", "));
 			out.print("#define INIT_");
 			out.print(struct.getName());
@@ -841,18 +870,18 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 		out.println("</pre>");
 	}
 
-	private int addField(Table table, DataTypeComponent field) {
+	private int addField(Table table, Field field) {
 		int row = table.addRow();
-		StringBuilder declarator = table.get(row, 0);
-		StringBuilder specifier = table.get(row, 1);
-		DataTypes.formatCDecl(field.getDataType(), field.getFieldName(), declarator, specifier);
-		declarator.insert(0, "\t");
-		specifier.append(";");
+		StringBuilder spec = table.get(row, 0);
+		StringBuilder decl = table.get(row, 1);
+		field.getType().toC(field.getName(), spec, decl);
+		spec.insert(0, "\t");
+		decl.append(";");
 		return row;
 	}
 
 	private void addPadding(Table table, int padding) {
-		if (padding != 0) {
+		if (padding > 0) {
 			int row = table.addRow();
 			table.get(row, 0)
 				.append("\t// char");
@@ -866,10 +895,10 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	/**
 	 * Render the list of access patterns for a structure to HTML.
 	 */
-	private void renderAccessPatterns(Structure struct, AccessPatterns patterns, PrintWriter out) {
+	private void renderAccessPatterns(BcpiStruct struct, AccessPatterns patterns, PrintWriter out) {
 		out.println("<ul>");
 
-		String decl = DataTypes.formatCDecl(struct);
+		String decl = struct.toC();
 		long total = patterns.getCount(struct);
 		List<AccessPattern> structPatterns = patterns.getRankedPatterns(struct);
 		int id = 0;
@@ -905,14 +934,10 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 		out.println("<code>" + htmlEscape(decl) + "</code>");
 		out.println("<ul>");
 
-		for (DataTypeComponent field : pattern.getType().getDefinedComponents()) {
-			if (!pattern.accesses(field)) {
-				continue;
-			}
-
+		for (var field : pattern.getFields()) {
 			out.print("<li>");
 
-			String fieldDecl = DataTypes.formatCDecl(field.getDataType(), field.getFieldName());
+			String fieldDecl = field.getType().toC(field.getName());
 			AccessPattern proj = pattern.project(field);
 			if (proj == null) {
 				String r = pattern.reads(field) ? "R" : "";

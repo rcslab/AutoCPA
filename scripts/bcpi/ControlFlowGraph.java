@@ -1,5 +1,7 @@
 package bcpi;
 
+import bcpi.util.Counter;
+
 import ghidra.graph.DefaultGEdge;
 import ghidra.graph.GDirectedGraph;
 import ghidra.graph.GEdge;
@@ -16,8 +18,6 @@ import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.HashMultiset;
-import com.google.common.collect.Multiset;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -101,7 +101,7 @@ public class ControlFlowGraph {
 	private final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> reverseCfg;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> domTree;
 	private final GDirectedGraph<CodeBlockVertex, GEdge<CodeBlockVertex>> postDomTree;
-	private final Multiset<CodeBlockVertex> coverage;
+	private final Counter<CodeBlockVertex> coverage;
 	private final Map<CodeBlockVertex, CodeBlockVertex> fallthroughEdges = new HashMap<>();
 
 	// Workaround for https://github.com/NationalSecurityAgency/ghidra/issues/2836
@@ -111,7 +111,7 @@ public class ControlFlowGraph {
 		this.bbModel = new BasicBlockModel(function.getProgram());
 		this.cfg = new JungDirectedGraph<>();
 		this.reverseCfg = new JungDirectedGraph<>();
-		this.coverage = HashMultiset.create();
+		this.coverage = new Counter<>();
 
 		try {
 			buildCfgs(function);
@@ -173,7 +173,7 @@ public class ControlFlowGraph {
 	/**
 	 * Add coverage info for a code address.
 	 */
-	public void addCoverage(Address address, int count) {
+	public void addCoverage(Address address, long count) {
 		try {
 			for (CodeBlock block : this.bbModel.getCodeBlocksContaining(address, TaskMonitor.DUMMY)) {
 				this.coverage.add(new CodeBlockVertex(block), count);
@@ -300,8 +300,8 @@ public class ControlFlowGraph {
 	/**
 	 * Get the amount of coverage for a block.
 	 */
-	private int getCoverage(CodeBlockVertex parent, CodeBlockVertex child) {
-		int result = this.coverage.count(child);
+	private long getCoverage(CodeBlockVertex parent, CodeBlockVertex child) {
+		long result = this.coverage.get(child);
 
 		// Smooth out zero denominators
 		++result;
@@ -338,7 +338,7 @@ public class ControlFlowGraph {
 					successors.addAll(children);
 				}
 
-				int total = 0;
+				long total = 0;
 				for (CodeBlockVertex vertex : successors) {
 					total += getCoverage(parent.vertex, vertex);
 				}

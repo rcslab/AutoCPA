@@ -1,6 +1,5 @@
 package bcpi.dataflow;
 
-import ghidra.program.model.data.DataType;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;

@@ -1,9 +1,6 @@
 package bcpi;
 
-import ghidra.program.model.data.Composite;
-import ghidra.program.model.data.DataType;
-import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.Structure;
+import bcpi.type.BcpiAggregate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,14 +10,14 @@ import java.util.Objects;
  * Metadata about a struct field reference.
  */
 public class FieldReference {
-	private final Composite outerType;
+	private final BcpiAggregate outerType;
 	private final boolean outerArray;
 	private final int offset;
 	private final int size;
 	private final boolean read;
 
-	FieldReference(Composite outerType, boolean outerArray, int offset, int size, boolean read) {
-		Objects.checkFromIndexSize(offset, size, outerType.getLength());
+	FieldReference(BcpiAggregate outerType, boolean outerArray, int offset, int size, boolean read) {
+		Objects.checkFromIndexSize(offset, size, outerType.getByteSize());
 		this.outerType = outerType;
 		this.outerArray = outerArray;
 		this.offset = offset;
@@ -31,7 +28,7 @@ public class FieldReference {
 	/**
 	 * @return The type of the outermost object whose field is being accessed.
 	 */
-	public Composite getOuterType() {
+	public BcpiAggregate getOuterType() {
 		return this.outerType;
 	}
 
@@ -93,7 +90,7 @@ public class FieldReference {
 
 	@Override
 	public String toString() {
-		String type = DataTypes.formatCDecl(this.outerType);
+		String type = this.outerType.toC();
 		String array = this.outerArray ? "[]" : "";
 		String rw = this.read ? "R" : "W";
 		return String.format("(%s%s + %d)%s(%d)", type, array, this.offset, rw, this.size);

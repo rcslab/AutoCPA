@@ -3,6 +3,8 @@ package bcpi;
 import bcpi.dataflow.BcpiDomain;
 import bcpi.dataflow.BcpiVarDomain;
 import bcpi.dataflow.DataFlow;
+import bcpi.type.BcpiType;
+import bcpi.util.Counter;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
@@ -16,9 +18,6 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
-
-import com.google.common.collect.HashMultiset;
-import com.google.common.collect.Multiset;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,7 +33,7 @@ import java.util.Optional;
 public class PcodeFormatter {
 	private final AnalysisContext ctx;
 	private final Map<Varnode, String> varNames = new HashMap<>();
-	private final Multiset<String> varCounts = HashMultiset.create();
+	private final Counter<String> varCounts = new Counter<>();
 	private final HighFunction highFunc;
 	private final Function lowFunc;
 	private final Program program;
@@ -84,8 +83,8 @@ public class PcodeFormatter {
 				.map(HighVariable::getName)
 				.filter(n -> !n.equals("UNNAMED"))
 				.orElse("var");
-			varCounts.add(highName);
-			return highName + "." + varCounts.count(highName);
+			varCounts.increment(highName);
+			return highName + "." + varCounts.get(highName);
 		});
 	}
 
@@ -131,7 +130,7 @@ public class PcodeFormatter {
 		var spec = new StringBuilder();
 		var prefix = new StringBuilder();
 		var suffix = new StringBuilder();
-		DataTypes.formatCDecl(type, spec, prefix, suffix);
+		BcpiType.from(type).toC(spec, prefix, suffix);
 		Tty.print("<fg=red>%s %s</fg><fg=blue>%s</fg><fg=red>%s</fg>", spec, prefix, name, suffix);
 	}
 

@@ -57,7 +57,7 @@ public class DebugAnalysis extends BcpiAnalysis {
 		data.getRows()
 			.stream()
 			.filter(r -> refs.getFields(r.address).isEmpty())
-			.sorted(Comparator.<BcpiDataRow>comparingInt(r -> -r.getCount(BcpiConfig.CACHE_MISS_COUNTER)))
+			.sorted(Comparator.<BcpiDataRow>comparingLong(r -> -r.getCount(BcpiConfig.CACHE_MISS_COUNTER)))
 			.limit(10)
 			.forEach(r -> {
 				System.out.format("%s: %d samples, no struct fields\n",

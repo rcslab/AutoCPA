@@ -1,6 +1,8 @@
 package bcpi;
 
-import ghidra.program.model.data.Structure;
+import bcpi.type.BcpiStruct;
+import bcpi.type.Field;
+import bcpi.type.Layout;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,101 +10,99 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 /**
  * Optimizes struct layouts via a constrained hill-climbing algorithm.
  */
 public class StructLayoutOptimizer {
 	private final AccessPatterns patterns;
-	private final Structure original;
+	private final BcpiStruct original;
 	private final StructAbiConstraints constraints;
-	private final CostModel<Structure> costModel;
+	private final CostModel<Layout> costModel;
 	private final int align;
 
-	public StructLayoutOptimizer(AccessPatterns patterns, Structure original, StructAbiConstraints constraints, CostModel<Structure> costModel) {
+	public StructLayoutOptimizer(AccessPatterns patterns, BcpiStruct original, StructAbiConstraints constraints, CostModel<Layout> costModel) {
 		this.patterns = patterns;
 		this.original = original;
 		this.constraints = constraints;
 		this.costModel = costModel;
-		this.align = DataTypes.getAlignment(original);
+		this.align = original.getByteAlignment();
 	}
 
 	/**
 	 * @return The optimized layout for the structure.
 	 */
-	public Structure optimize() {
-		List<Field> origFields = Field.allFields(this.original);
-		List<Field> fields = new ArrayList<>();
+	public Layout optimize() {
+		Layout layout = this.original.getLayout().emptyCopy();
 		Set<Field> added = new HashSet<>();
 
 		// Add fields with fixed positions first
-		for (Field field : origFields) {
+		for (var field : this.original.getFields()) {
 			if (this.constraints.isFixed(field)) {
-				pack(fields, field);
+				layout = pack(layout, field);
 				added.add(field);
 			}
 		}
 
 		// Then access patterns from most common to least
-		for (AccessPattern pattern : patterns.getRankedPatterns(this.original)) {
-			pattern.getFields()
-				.stream()
-				.filter(f -> !added.contains(f))
-				.sorted(Comparator.comparingInt(f -> f.getOrdinal()))
-				.forEach(f -> pack(fields, f));
-
-			added.addAll(pattern.getFields());
+		for (var pattern : patterns.getRankedPatterns(this.original)) {
+			for (var field : pattern.getFields()) {
+				if (added.add(field)) {
+					layout = pack(layout, field);
+				}
+			}
 		}
 
 		// Add any missing fields we didn't see
-		origFields
-			.stream()
-			.filter(f -> !added.contains(f))
-			.forEach(f -> pack(fields, f));
+		for (var field : this.original.getFields()) {
+			if (added.add(field)) {
+				layout = pack(layout, field);
+			}
+		}
 
-		return build(fields);
+		return layout;
+	}
+
+	private static class LayoutAndCost {
+		final Layout layout;
+		final long cost;
+
+		LayoutAndCost(Layout layout, long cost) {
+			this.layout = layout;
+			this.cost = cost;
+		}
+	}
+
+	private static final Comparator<LayoutAndCost> LOWEST_COST_FIRST = Comparator
+		.<LayoutAndCost>comparingLong(lac -> lac.cost);
+
+	/**
+	 * Calculate the cost of inserting a field at a position.
+	 */
+	private LayoutAndCost cost(Layout layout, Field field, int i) {
+		var newLayout = layout.prefix(i);
+		newLayout.add(field);
+
+		var fields = layout.getFields();
+		for (int j = i; j < fields.size(); ++j) {
+			newLayout.add(fields.get(j));
+		}
+
+		var cost = this.costModel.cost(newLayout);
+		return new LayoutAndCost(newLayout, cost);
 	}
 
 	/**
 	 * Pack a new field into a structure.
 	 */
-	private void pack(List<Field> fields, Field field) {
-		fields.add(field);
+	private Layout pack(Layout layout, Field field) {
+		var best = IntStream.rangeClosed(0, layout.getFields().size())
+			.parallel()
+			.mapToObj(i -> cost(layout, field, i))
+			.min(LOWEST_COST_FIRST)
+			.orElseThrow(() -> new RuntimeException("Unsatisfiable constraints for " + field));
 
-		int bestI = -1;
-		long bestCost = -1;
-		for (int i = fields.size() - 1; ; --i) {
-			if (this.constraints.check(fields)) {
-				long newCost = this.costModel.cost(build(fields));
-				if (bestI < 0 || newCost < bestCost) {
-					bestI = i;
-					bestCost = newCost;
-				}
-			}
-
-			if (i == 0) {
-				break;
-			}
-			Collections.swap(fields, i - 1, i);
-		}
-
-		if (bestI < 0) {
-			throw new RuntimeException("Unsatisfiable constraints for " + field);
-		}
-
-		// The new field will be at index zero.  Rotate it into place.
-		Collections.rotate(fields.subList(0, bestI + 1), -1);
-	}
-
-	/**
-	 * Make a copy of a structure with reordered fields.
-	 */
-	private Structure build(List<Field> fields) {
-		Structure result = DataTypes.emptyStructLike(this.original);
-		for (Field field : fields) {
-			field.copyTo(result);
-		}
-		DataTypes.padTail(result, this.align);
-		return result;
+		return best.layout;
 	}
 }

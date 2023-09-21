@@ -31,7 +31,7 @@ public class BcpiControlFlow {
 
 		rows.stream()
 			.forEach(row -> {
-				int count = row.getCount(BcpiConfig.INSTRUCTION_COUNTER);
+				long count = row.getCount(BcpiConfig.INSTRUCTION_COUNTER);
 				ControlFlowGraph cfg = getCfg(row.function);
 				synchronized (cfg) {
 					cfg.addCoverage(row.address, count);

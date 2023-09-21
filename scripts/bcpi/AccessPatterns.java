@@ -1,10 +1,10 @@
 package bcpi;
 
+import bcpi.type.BcpiStruct;
+import bcpi.util.Counter;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
-import ghidra.program.model.data.Composite;
-import ghidra.program.model.data.DataTypeComponent;
-import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Function;
 import ghidra.util.Msg;
 
@@ -29,8 +29,8 @@ import java.util.stream.Collectors;
  */
 public class AccessPatterns {
 	// Stores the access patterns for each struct
-	private final ConcurrentMap<Structure, Set<AccessPattern>> patterns = new ConcurrentHashMap<>();
-	private final ConcurrentMap<AccessPattern, LongAdder> counts = new ConcurrentHashMap<>();
+	private final ConcurrentMap<BcpiStruct, Set<AccessPattern>> patterns = new ConcurrentHashMap<>();
+	private final Counter<AccessPattern> counts = new Counter<>();
 	private final ConcurrentMap<AccessPattern, Set<Function>> functions = new ConcurrentHashMap<>();
 	private final LongAdder samples = new LongAdder();
 	private final LongAdder attributed = new LongAdder();
@@ -58,8 +58,8 @@ public class AccessPatterns {
 			return;
 		}
 
-		Map<Structure, BitSet> reads = new HashMap<>();
-		Map<Structure, BitSet> writes = new HashMap<>();
+		var reads = new HashMap<BcpiStruct, BitSet>();
+		var writes = new HashMap<BcpiStruct, BitSet>();
 
 		Set<CodeBlock> blocks = getCodeBlocksThrough(row.function, row.address);
 		for (CodeBlock block : blocks) {
@@ -70,10 +70,10 @@ public class AccessPatterns {
 				}
 
 				for (FieldReference ref : this.refs.getFields(address)) {
-					Composite type = ref.getOuterType();
-					if (type instanceof Structure) {
+					var type = ref.getOuterType();
+					if (type instanceof BcpiStruct) {
 						(ref.isRead() ? reads : writes)
-							.computeIfAbsent((Structure) type, k -> new BitSet())
+							.computeIfAbsent((BcpiStruct)type, k -> new BitSet())
 							.set(ref.getOffset(), ref.getEndOffset());
 					}
 				}
@@ -85,7 +85,7 @@ public class AccessPatterns {
 			this.attributed.add(count);
 		}
 
-		for (Structure struct : Sets.union(reads.keySet(), writes.keySet())) {
+		for (var struct : Sets.union(reads.keySet(), writes.keySet())) {
 			BitSet read = reads.getOrDefault(struct, new BitSet());
 			BitSet written = writes.getOrDefault(struct, new BitSet());
 			AccessPattern pattern = new AccessPattern(struct, read, written);
@@ -97,24 +97,21 @@ public class AccessPatterns {
 	 * Record an access pattern and its projections onto sub-structs.
 	 */
 	private void addProjections(AccessPattern pattern, long count, Function func) {
-		Structure struct = (Structure) pattern.getType();
+		var struct = (BcpiStruct)pattern.getType();
 
 		this.patterns
 			.computeIfAbsent(struct, k -> ConcurrentHashMap.newKeySet())
 			.add(pattern);
 		this.counts
-			.computeIfAbsent(pattern, k -> new LongAdder())
-			.add(count);
+			.add(pattern, count);
 		this.functions
 			.computeIfAbsent(pattern, k -> ConcurrentHashMap.newKeySet())
 			.add(func);
 
-		for (DataTypeComponent field : struct.getDefinedComponents()) {
-			if (pattern.accesses(field)) {
-				AccessPattern proj = pattern.project(field);
-				if (proj != null && proj.getType() instanceof Structure) {
-					addProjections(proj, count, func);
-				}
+		for (var field : pattern.getFields()) {
+			var proj = pattern.project(field);
+			if (proj != null && proj.getType() instanceof BcpiStruct) {
+				addProjections(proj, count, func);
 			}
 		}
 	}
@@ -123,7 +120,7 @@ public class AccessPatterns {
 	 * @return The fraction of samples that we found an access pattern for.
 	 */
 	public double getHitRate() {
-		return (double) this.attributed.sum() / this.samples.sum();
+		return (double)this.attributed.sum() / this.samples.sum();
 	}
 
 	/**
@@ -137,14 +134,14 @@ public class AccessPatterns {
 	/**
 	 * @return All the structures about which we have data.
 	 */
-	public Set<Structure> getStructures() {
+	public Set<BcpiStruct> getStructs() {
 		return Collections.unmodifiableSet(this.patterns.keySet());
 	}
 
 	/**
 	 * @return All the access patterns we saw for a structure, from most to least often.
 	 */
-	public List<AccessPattern> getRankedPatterns(Structure struct) {
+	public List<AccessPattern> getRankedPatterns(BcpiStruct struct) {
 		return this.patterns
 			.getOrDefault(struct, Collections.emptySet())
 			.stream()
@@ -157,7 +154,7 @@ public class AccessPatterns {
 	/**
 	 * @return The total number of accesses to a struct.
 	 */
-	public long getCount(Structure struct) {
+	public long getCount(BcpiStruct struct) {
 		return this.patterns
 			.getOrDefault(struct, Collections.emptySet())
 			.stream()
@@ -169,9 +166,7 @@ public class AccessPatterns {
 	 * @return The number of occurrences of an access pattern.
 	 */
 	public long getCount(AccessPattern pattern) {
-		return this.counts
-			.getOrDefault(pattern, new LongAdder())
-			.sum();
+		return this.counts.get(pattern);
 	}
 
 	/**
