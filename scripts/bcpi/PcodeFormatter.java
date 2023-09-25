@@ -5,6 +5,7 @@ import bcpi.dataflow.BcpiVarDomain;
 import bcpi.dataflow.DataFlow;
 import bcpi.type.BcpiType;
 import bcpi.util.Counter;
+import bcpi.util.Tty;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;

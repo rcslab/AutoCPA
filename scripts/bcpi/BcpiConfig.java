@@ -4,6 +4,9 @@ package bcpi;
  * BCPI analysis configuration.
  */
 public class BcpiConfig {
+	/** Log level. */
+	public static final String LOG_LEVEL = stringEnv("BCPI_LOG_LEVEL", "DEBUG");
+
 	/** Counter to use for cache misses. */
 	public static final String CACHE_MISS_COUNTER = stringEnv("BCPI_CACHE_MISS_COUNTER", BcpiCounters.DC_MISSES);
 	/** Counter to use for retired instructions. */

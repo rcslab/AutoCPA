@@ -1,7 +1,8 @@
 package bcpi;
 
+import bcpi.util.Log;
+
 import ghidra.program.model.listing.Function;
-import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
 import java.util.Collection;
@@ -27,7 +28,7 @@ public class BcpiControlFlow {
 	 */
 	public void addCoverage(BcpiData data) {
 		Collection<BcpiDataRow> rows = data.getRows();
-		Msg.info(this, String.format("Adding coverage from %,d instructions", rows.size()));
+		Log.info("Adding coverage from %,d instructions", rows.size());
 
 		rows.stream()
 			.forEach(row -> {
