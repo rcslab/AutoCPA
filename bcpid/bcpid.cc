@@ -11,6 +11,7 @@
 
 #include <err.h>
 #include <fcntl.h>
+#include <kenv.h>
 #include <libprocstat.h>
 #include <pmc.h>
 #include <pmclog.h>
@@ -75,9 +76,6 @@
 
 // Default sampling interval
 #define BCPID_DEFAULT_COUNT 65536
-
-// Path to kernel object
-#define BCPID_KERNEL_PATH "/boot/kernel/"
 
 struct bcpid;
 typedef void (*bcpid_event_handler)(bcpid *b, const struct pmclog_ev *);
@@ -441,33 +439,58 @@ bcpid_report_pmc_ctr(bcpid *b)
 }
 
 /*
+ * Get the kernel module search path.
+ */
+static std::vector<std::string>
+bcpid_module_path()
+{
+	char value[KENV_MVALLEN + 1];
+	if (kenv(KENV_GET, "module_path", value, sizeof(value)) < 0) {
+		perror("kenv");
+		return { "/boot/kernel", "/boot/modules" };
+	}
+
+	std::vector<std::string> ret;
+	std::string paths = value;
+	size_t i = 0;
+	do {
+		size_t j = paths.find(';', i);
+		ret.push_back(paths.substr(i, j - i));
+		i = j + 1;
+	} while (i > 0);
+
+	return ret;
+}
+
+/*
  * Initialize object after receives MAP_IN event from PMCLOG
  */
 static void
 bcpid_event_handler_mapin(bcpid *b, const struct pmclog_ev *ev)
 {
 	const struct pmclog_ev_map_in *mi = &ev->pl_u.pl_mi;
-	pid_t pid = mi->pl_pid;
-	uintfptr_t start = mi->pl_start;
-	const char *path = mi->pl_pathname;
-
-	if (pid != -1) {
+	if (mi->pl_pid != -1) {
 		return;
 	}
 
-	std::string object_path;
-
-	// Path provided by PMCLOG is erroneous for kernel modules and kernel
-	// itself This is fixed by prepending top level path to kernel and
-	// modules
-	if (!strcmp(path, "kernel") || strstr(path, ".ko")) {
-		object_path = std::string(BCPID_KERNEL_PATH) +
-		    std::string(path);
+	std::string path = mi->pl_pathname;
+	if (path.find('/') == std::string::npos) {
+		// Before FreeBSD commit 53d0b9e438bc ("pmc: Provide full path
+		// to modules from kernel linker"), the path contains only the
+		// basename, so look up the full path in the module search path
+		static auto dirs = bcpid_module_path();
+		for (const auto &dir : dirs) {
+			auto full_path = dir + "/" + path;
+			if (access(full_path.c_str(), F_OK) == 0) {
+				path = full_path;
+				break;
+			}
+		}
 	}
 
 	bcpid_kernel_object ko;
-	ko.path = object_path;
-	ko.start = start;
+	ko.path = path;
+	ko.start = mi->pl_start;
 
 	b->kernel_objects.push_back(ko);
 }
