@@ -1,11 +1,18 @@
 package bcpi;
 
+import bcpi.util.TtyErrorLogger;
+
 import ghidra.app.script.GhidraScript;
+import ghidra.util.Msg;
 
 /**
  * Base class for BCPI analyses.
  */
 public abstract class BcpiAnalysis extends GhidraScript {
+	static {
+		Msg.setErrorLogger(TtyErrorLogger.INSTANCE);
+	}
+
 	private AnalysisContext ctx = null;
 
 	/**
