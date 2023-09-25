@@ -3,6 +3,7 @@ package bcpi;
 import bcpi.dataflow.BcpiDomain;
 import bcpi.dataflow.DataFlow;
 import bcpi.type.BcpiAggregate;
+import bcpi.util.Log;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
@@ -14,7 +15,6 @@ import ghidra.program.model.pcode.LocalSymbolMap;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.Varnode;
-import ghidra.util.Msg;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -63,7 +63,7 @@ public class FieldReferences {
 	 * Collect field references from a set of functions.
 	 */
 	public void collect(Collection<Function> functions) {
-		Msg.info(this, String.format("Computing data flow for %,d functions", functions.size()));
+		Log.info("Computing data flow for %,d functions", functions.size());
 
 		functions
 			.parallelStream()

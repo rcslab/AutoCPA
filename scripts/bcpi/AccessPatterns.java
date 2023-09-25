@@ -2,11 +2,11 @@ package bcpi;
 
 import bcpi.type.BcpiStruct;
 import bcpi.util.Counter;
+import bcpi.util.Log;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
 import ghidra.program.model.listing.Function;
-import ghidra.util.Msg;
 
 import com.google.common.collect.Sets;
 
@@ -48,7 +48,7 @@ public class AccessPatterns {
 	public void collect(BcpiData data) {
 		// Find access patterns associated with cache misses
 		Collection<BcpiDataRow> rows = data.getRows();
-		Msg.info(this, String.format("Collecting access patterns from %,d instructions", rows.size()));
+		Log.info("Collecting access patterns from %,d instructions", rows.size());
 		rows.parallelStream().forEach(this::collect);
 	}
 

@@ -1,9 +1,10 @@
 package bcpi;
 
+import bcpi.util.Log;
+
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.ExternalLocation;
-import ghidra.util.Msg;
 
 import com.google.common.collect.ImmutableList;
 
@@ -56,7 +57,7 @@ public class Linker {
 			.filter(f -> !f.isExternal())
 			.findFirst()
 			.or(() -> {
-				Msg.warn(this, "Couldn't resolve function " + func);
+				Log.warn("Couldn't resolve function %s", func);
 				return Optional.empty();
 			}));
 	}

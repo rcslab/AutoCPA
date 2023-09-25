@@ -13,11 +13,11 @@ import bcpi.type.BcpiStruct;
 import bcpi.type.BcpiType;
 import bcpi.type.Field;
 import bcpi.type.Layout;
+import bcpi.util.Log;
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
-import ghidra.util.Msg;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.ArrayListMultimap;
@@ -228,9 +228,9 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	private Path resultsPath;
 	private long time;
 
-	private void timerMsg(String msg) {
+	private void timer(String msg) {
 		long now = System.currentTimeMillis();
-		Msg.info(this, String.format("%s took %,d ms", msg, now - time));
+		Log.debug("%s took %,d ms", msg, now - time);
 		this.time = now;
 	}
 
@@ -238,14 +238,14 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	protected void analyze(String[] args) throws Exception {
 		long uptime = ManagementFactory.getRuntimeMXBean().getUptime();
 		this.time = System.currentTimeMillis() - uptime;
-		timerMsg("Starting analysis");
+		timer("Starting analysis");
 
 		var ctx = getContext();
 
 		// Read address_info.csv to find relevant addresses
 		Path csv = Paths.get(args[0]);
 		BcpiData data = BcpiData.parse(csv, ctx);
-		timerMsg("Parsing data");
+		timer("Parsing data");
 
 		// Process command line arguments
 		for (int i = 1; i < args.length; ++i) {
@@ -261,7 +261,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 				ConstraintArg constraint = parsed.get();
 				this.constraints.put(constraint.getType(), constraint);
 			} else {
-				Msg.error(this, "Unsupported command line argument " + arg);
+				Log.error("Unsupported command line argument " + arg);
 				return;
 			}
 		}
@@ -273,23 +273,23 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 
 		BcpiControlFlow cfgs = new BcpiControlFlow(ctx);
 		cfgs.addCoverage(data);
-		timerMsg("Adding coverage");
+		timer("Adding coverage");
 
 		FieldReferences refs = new FieldReferences(ctx, cfgs);
 		refs.collect(funcs);
-		timerMsg("Computing data flow");
+		timer("Computing data flow");
 
 		// Use our collected data to infer field access patterns
 		AccessPatterns patterns = new AccessPatterns(cfgs, refs);
 		patterns.collect(data);
 		double hitRate = 100.0 * patterns.getHitRate();
-		Msg.info(this, String.format("Found patterns for %.2f%% of samples", hitRate));
-		timerMsg("Collecting access patterns");
+		Log.info("Found patterns for %.2f%% of samples", hitRate);
+		timer("Collecting access patterns");
 
 		String name = getState().getProject().getName();
 		this.resultsPath = Paths.get("results").resolve(name);
 		render(patterns);
-		timerMsg("Optimizing structures");
+		timer("Optimizing structures");
 	}
 
 	/**
@@ -412,7 +412,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 	 */
 	private void render(AccessPatterns patterns) throws Exception {
 		var structs = patterns.getStructs();
-		Msg.info(this, String.format("Optimizing %,d structures", structs.size()));
+		Log.info("Optimizing %,d structures", structs.size());
 
 		Path structResults = this.resultsPath.resolve("structs");
 		Files.createDirectories(structResults);
@@ -503,7 +503,7 @@ public class StructOrderAnalysis extends BcpiAnalysis {
 			out.println("</html>");
 		}
 
-		Msg.info(this, "Results available in " + index.toAbsolutePath());
+		Log.info("Results available in %s", index.toAbsolutePath());
 	}
 
 	/**

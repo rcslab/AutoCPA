@@ -1,5 +1,7 @@
 package bcpi;
 
+import bcpi.util.Log;
+
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileProcess;
@@ -13,7 +15,6 @@ import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PackedDecode;
 import ghidra.program.model.pcode.PcodeDataTypeManager;
 import ghidra.program.model.symbol.IdentityNameTransformer;
-import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
 import com.google.common.base.Throwables;
@@ -77,7 +78,8 @@ public class BcpiDecompiler {
 					e = cause;
 				}
 			}
-			Msg.error(this, "Error decompiling " + func.getName(), e);
+			Log.error("Error decompiling %s", func.getName());
+			Log.error(e);
 		}
 
 		if (result == null) {
@@ -141,9 +143,9 @@ public class BcpiDecompiler {
 
 			String error = results.getErrorMessage().strip();
 			if (!results.decompileCompleted()) {
-				Msg.error(this, func.getName() + ": " + error);
+				Log.error("%s(): %s", func.getName(), error);
 			} else if (!error.isEmpty()) {
-				Msg.warn(this, func.getName() + ": " + error);
+				Log.warn("%s(): %s", func.getName(), error);
 			}
 
 			return results.getHighFunction();
