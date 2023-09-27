@@ -36,13 +36,13 @@ public final class TtyErrorLogger implements ErrorLogger {
 
 	private void header(Level level, String tag, String line) {
 		switch (level) {
-		case Level.INFO:
+		case INFO:
 			Tty.print("<fg=cyan><b>%-5s</b> <i>%-20s</i></fg> %s\n", level, tag, line);
 			break;
-		case Level.WARN:
+		case WARN:
 			Tty.print("<fg=yellow><b>%-5s</b> <i>%-20s</i> <b>%s</b></fg>\n", level, tag, line);
 			break;
-		case Level.ERROR:
+		case ERROR:
 			Tty.print("<fg=red><b>%-5s</b> <i>%-20s</i> <b>%s</b></fg>\n", level, tag, line);
 			break;
 		default:
@@ -53,13 +53,13 @@ public final class TtyErrorLogger implements ErrorLogger {
 
 	private void trailer(Level level, String line) {
 		switch (level) {
-		case Level.INFO:
+		case INFO:
 			Tty.print("%s\n", line);
 			break;
-		case Level.WARN:
+		case WARN:
 			Tty.print("<fg=yellow><b>%s</b></fg>\n", line);
 			break;
-		case Level.ERROR:
+		case ERROR:
 			Tty.print("<fg=red><b>%s</b></fg>\n", line);
 			break;
 		default:
@@ -70,13 +70,13 @@ public final class TtyErrorLogger implements ErrorLogger {
 
 	private void stackTrace(Level level, String line) {
 		switch (level) {
-		case Level.INFO:
+		case INFO:
 			Tty.print("<fg=cyan>%s</fg>\n", line);
 			break;
-		case Level.WARN:
+		case WARN:
 			Tty.print("<fg=yellow>%s</fg>\n", line);
 			break;
-		case Level.ERROR:
+		case ERROR:
 			Tty.print("<fg=red>%s</fg>\n", line);
 			break;
 		default:
