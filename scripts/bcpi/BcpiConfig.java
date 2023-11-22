@@ -22,10 +22,13 @@ public class BcpiConfig {
 	/** Maximum function size for IPA. */
 	public static final int MAX_INLINE_SIZE = intEnv("BCPI_MAX_INLINE_SIZE", 1024);
 
-	/** Maximum beam width during beam search. */
+	/** Maximum beam width during CFG beam search. */
 	public static final int BEAM_WIDTH = intEnv("BCPI_BEAM_WIDTH", 5);
-	/** Number of paths to use from beam search. */
+	/** Number of CFG paths to use from beam search. */
 	public static final int BEAM_PATHS = intEnv("BCPI_BEAM_PATHS", 1);
+
+	/** Maximum beam width during struct layout beam search. */
+	public static final int LAYOUT_BEAM_WIDTH = intEnv("BCPI_LAYOUT_BEAM_WIDTH", 4);
 
 	/** Whether to assume structures are allocated at the beginning of cache lines. */
 	public static final boolean ASSUME_CACHE_ALIGNED = checkEnv("BCPI_ASSUME_CACHE_ALIGNED");

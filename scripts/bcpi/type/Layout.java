@@ -3,6 +3,7 @@ package bcpi.type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -116,6 +117,24 @@ public final class Layout {
 			this.size = alignCeil(this.fields.get(i - 1).getEndByte(), this.align);
 		}
 		return this;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (obj == this) {
+			return true;
+		} else if (obj instanceof Layout other) {
+			return this.size == other.size
+				&& this.align == other.align
+				&& this.fields.equals(other.fields);
+		} else {
+			return false;
+		}
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(this.size, this.align, this.fields);
 	}
 
 	@Override

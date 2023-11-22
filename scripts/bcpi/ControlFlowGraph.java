@@ -401,7 +401,6 @@ class BeamPath implements BeamState<BeamPath> {
 
 	@Override
 	public int compareTo(BeamPath other) {
-		// Higher weights first
-		return Double.compare(other.weight, this.weight);
+		return Double.compare(this.weight, other.weight);
 	}
 }

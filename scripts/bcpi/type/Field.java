@@ -3,6 +3,8 @@ package bcpi.type;
 import ghidra.program.model.data.BitFieldDataType;
 import ghidra.program.model.data.DataTypeComponent;
 
+import java.util.Objects;
+
 /**
  * Struct/union fields.
  */
@@ -125,6 +127,27 @@ public final class Field {
 	 */
 	public Field reorder(int startBit, int index) {
 		return new Field(this.ghidra, this.parent, this.type, this.name, startBit, index, this.origIndex);
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj) {
+			return true;
+		} else if (obj instanceof Field other) {
+			return this.parent.equals(other.parent)
+				&& this.type.equals(other.type)
+				&& this.name.equals(other.name)
+				&& this.startBit == other.startBit
+				&& this.index == other.index
+				&& this.origIndex == other.origIndex;
+		} else {
+			return false;
+		}
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(this.parent, this.type, this.name, this.startBit, this.index, this.origIndex);
 	}
 
 	@Override
