@@ -1,5 +1,7 @@
 package bcpi;
 
+import bcpi.util.BeamSearch;
+import bcpi.util.BeamState;
 import bcpi.util.Counter;
 
 import ghidra.graph.DefaultGEdge;
@@ -26,9 +28,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A code block in a control flow graph.
@@ -300,7 +302,7 @@ public class ControlFlowGraph {
 	/**
 	 * Get the amount of coverage for a block.
 	 */
-	private long getCoverage(CodeBlockVertex parent, CodeBlockVertex child) {
+	long getCoverage(CodeBlockVertex parent, CodeBlockVertex child) {
 		long result = this.coverage.get(child);
 
 		// Smooth out zero denominators
@@ -322,61 +324,22 @@ public class ControlFlowGraph {
 		GDirectedGraph<CodeBlockVertex, CodeBlockEdge> cfg,
 		Set<CodeBlockVertex> vertices
 	) {
-		PriorityQueue<BeamPath> best = new PriorityQueue<>();
-
-		PriorityQueue<BeamPath> beam = new PriorityQueue<>();
-		beam.offer(new BeamPath(null, start, 1.0));
-
-		while (!beam.isEmpty()) {
-			List<BeamPath> parents = new ArrayList<>(beam);
-			beam.clear();
-
-			for (BeamPath parent : parents) {
-				Set<CodeBlockVertex> successors = new HashSet<>();
-				Collection<CodeBlockVertex> children = cfg.getSuccessors(parent.vertex);
-				if (children != null) {
-					successors.addAll(children);
-				}
-
-				long total = 0;
-				for (CodeBlockVertex vertex : successors) {
-					total += getCoverage(parent.vertex, vertex);
-				}
-
-				// Don't add looping paths
-				for (BeamPath tail = parent; tail != null; tail = tail.prev) {
-					successors.remove(tail.vertex);
-				}
-
-				for (CodeBlockVertex vertex : successors) {
-					double weight = (double)getCoverage(parent.vertex, vertex) / total;
-					beam.offer(new BeamPath(parent, vertex, weight));
-					if (beam.size() > BcpiConfig.BEAM_WIDTH) {
-						beam.poll();
-					}
-				}
-
-				if (total == 0) {
-					best.offer(parent);
-					if (best.size() > BcpiConfig.BEAM_PATHS) {
-						best.poll();
-					}
-				}
-			}
-		}
-
-		for (BeamPath path : best) {
-			for (BeamPath tail = path; tail != null; tail = tail.prev) {
-				vertices.add(tail.vertex);
-			}
-		}
+		new BeamSearch<>(new BeamPath(this, cfg, start))
+			.search(BcpiConfig.BEAM_WIDTH, BcpiConfig.BEAM_PATHS)
+			.stream()
+			.flatMap(BeamPath::vertices)
+			.forEach(vertices::add);
 	}
 }
 
 /**
  * A partial path found during beam search.
  */
-class BeamPath implements Comparable<BeamPath> {
+class BeamPath implements BeamState<BeamPath> {
+	/** The parent CFG. */
+	final ControlFlowGraph cfg;
+	/** The CFG itself. */
+	final GDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph;
 	/** The previous node in the path. */
 	final BeamPath prev;
 	/** The current node in the path. */
@@ -384,15 +347,56 @@ class BeamPath implements Comparable<BeamPath> {
 	/** Log probability of this path. */
 	final double weight;
 
-	BeamPath(BeamPath prev, CodeBlockVertex vertex, double weight) {
-		weight = Math.log(weight);
-		if (prev != null) {
-			weight += prev.weight;
-		}
+	BeamPath(ControlFlowGraph cfg, GDirectedGraph<CodeBlockVertex, CodeBlockEdge> graph, CodeBlockVertex vertex) {
+		this.cfg = cfg;
+		this.graph = graph;
+		this.prev = null;
+		this.vertex = vertex;
+		this.weight = 0.0;
+	}
 
+	BeamPath(BeamPath prev, CodeBlockVertex vertex, double weight) {
+		this.cfg = prev.cfg;
+		this.graph = prev.graph;
 		this.prev = prev;
 		this.vertex = vertex;
-		this.weight = weight;
+		this.weight = prev.weight + Math.log(weight);
+	}
+
+	Stream<CodeBlockVertex> vertices() {
+		return Stream.iterate(this, p -> p.prev != null, p -> p.prev)
+			.map(p -> p.vertex);
+	}
+
+	@Override
+	public boolean isFinal() {
+		return successors().isEmpty();
+	}
+
+	private long getCoverage(CodeBlockVertex dest) {
+		return this.cfg.getCoverage(this.vertex, dest);
+	}
+
+	@Override
+	public Collection<BeamPath> successors() {
+		var successors = new HashSet<CodeBlockVertex>();
+		var children = this.graph.getSuccessors(this.vertex);
+		if (children != null) {
+			successors.addAll(children);
+		}
+
+		var total = successors.stream()
+			.mapToLong(this::getCoverage)
+			.sum();
+
+		// Don't add looping paths
+		for (var tail = this; tail != null; tail = tail.prev) {
+			successors.remove(tail.vertex);
+		}
+
+		return successors.stream()
+			.map(v -> new BeamPath(this, v, (double)this.getCoverage(v) / total))
+			.collect(Collectors.toList());
 	}
 
 	@Override
