@@ -18,31 +18,3 @@ index e8af0c939..5ae6b6535 100644
        indop->getOut()->setActiveHeritage();
        write.push_back(indop->getOut());
      }
-diff --git a/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java b/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java
-index 3cd5a394b..891ead4dd 100644
---- a/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java
-+++ b/Ghidra/Framework/Generic/src/main/java/ghidra/framework/Platform.java
-@@ -50,6 +50,11 @@ public enum Platform {
- 	 */
- 	LINUX_ARM_64(OperatingSystem.LINUX, Architecture.ARM_64, "linux_arm_64", ".so", ""),
- 
-+	/**
-+	 * Identifies a FreeBSD x86 64-bit OS.
-+	 */
-+	FREEBSD_X86_64(OperatingSystem.FREEBSD, Architecture.X86_64, "freebsd_amd64", ".so", ""),
-+
- 	/**
- 	 * Identifies a macOS x86 32-bit OS.
- 	 */
-diff --git a/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java b/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java
-index 1abe4d34b..fe3d49276 100644
---- a/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java
-+++ b/Ghidra/Framework/Utility/src/main/java/ghidra/framework/OperatingSystem.java
-@@ -20,6 +20,7 @@ public enum OperatingSystem {
- 	WINDOWS("Windows"),
- 	LINUX("Linux"),
- 	MAC_OS_X("Mac OS X"),
-+	FREEBSD("FreeBSD"),
- 	UNSUPPORTED("Unsupported Operating System");
- 
- 	/**

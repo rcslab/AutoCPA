@@ -3,14 +3,15 @@
 set -eu
 
 GHIDRA="$ROOT/ghidra"
-GHIDRA_VERSION=ghidra_10.3.1_PUBLIC
-GHIDRA_DATE=20230614
+GHIDRA_VERSION=ghidra_11.1.2_PUBLIC
+GHIDRA_CONFIG="${XDK_CONFIG_HOME:-$HOME/.config}/ghidra/$GHIDRA_VERSION"
+GHIDRA_DATE=20240709
 GHIDRA_ROOT=${GHIDRA_ROOT:-"$GHIDRA/$GHIDRA_VERSION"}
 GHIDRA_PROJECTS=${GHIDRA_PROJECTS:-"$GHIDRA/projects"}
 
 ghidra_headless() {
     # Clear the cache of .class files in case they're out of sync
-    OSGI_DIR="$HOME/.ghidra/.$GHIDRA_VERSION/osgi/compiled-bundles"
+    OSGI_DIR="$GHIDRA_CONFIG/osgi/compiled-bundles"
     if [ -d "$OSGI_DIR" ]; then
         rm -r "$OSGI_DIR"
     fi
