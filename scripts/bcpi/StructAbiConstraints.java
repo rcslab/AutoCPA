@@ -139,11 +139,11 @@ public class StructAbiConstraints {
 		}
 
 		// Collapse consecutive duplicates
-		int length = 0;
+		int length = 1;
 		for (int i = 1; i < groups.length; ++i) {
-			if (groups[i] != groups[length]) {
-				++length;
+			if (groups[i] != groups[length - 1]) {
 				groups[length] = groups[i];
+				++length;
 			}
 		}
 

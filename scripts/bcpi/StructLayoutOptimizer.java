@@ -78,19 +78,18 @@ public class StructLayoutOptimizer {
 		.<LayoutAndCost>comparingLong(lac -> lac.cost);
 
 	/**
-	 * Calculate the cost of inserting a field at a position.
+	 * Insert a field into a layout.
 	 */
-	private LayoutAndCost cost(Layout layout, Field field, int i) {
-		var newLayout = layout.prefix(i);
-		newLayout.add(field);
+	private Layout insertField(Layout layout, Field field, int i) {
+		var ret = layout.prefix(i);
+		ret.add(field);
 
 		var fields = layout.getFields();
 		for (int j = i; j < fields.size(); ++j) {
-			newLayout.add(fields.get(j));
+			ret.add(fields.get(j));
 		}
 
-		var cost = this.costModel.cost(newLayout);
-		return new LayoutAndCost(newLayout, cost);
+		return ret;
 	}
 
 	/**
@@ -99,7 +98,9 @@ public class StructLayoutOptimizer {
 	private Layout pack(Layout layout, Field field) {
 		var best = IntStream.rangeClosed(0, layout.getFields().size())
 			.parallel()
-			.mapToObj(i -> cost(layout, field, i))
+			.mapToObj(i -> insertField(layout, field, i))
+			.filter(this.constraints::check)
+			.map(l -> new LayoutAndCost(l, this.costModel.cost(l)))
 			.min(LOWEST_COST_FIRST)
 			.orElseThrow(() -> new RuntimeException("Unsatisfiable constraints for " + field));
 

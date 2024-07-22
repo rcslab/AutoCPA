@@ -3,6 +3,7 @@ package bcpi.type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Memory layouts for aggregates.
@@ -115,5 +116,13 @@ public final class Layout {
 			this.size = alignCeil(this.fields.get(i - 1).getEndByte(), this.align);
 		}
 		return this;
+	}
+
+	@Override
+	public String toString() {
+		return this.fields
+			.stream()
+			.map(Field::toString)
+			.collect(Collectors.joining("\n"));
 	}
 }
