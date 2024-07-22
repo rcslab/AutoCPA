@@ -1,5 +1,7 @@
 package bcpi;
 
+import bcpi.util.Log;
+
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.DomainObject;
@@ -122,26 +124,59 @@ public class AnalysisContext {
 	}
 
 	/**
+	 * @return The function at the given address, if any.
+	 */
+	public Function getFunctionAt(Address addr) {
+		var funcs = this.programs.stream()
+			.map(Program::getFunctionManager)
+			.map(fm -> fm.getFunctionAt(addr))
+			.filter(Objects::nonNull)
+			.collect(Collectors.toList());
+
+		if (funcs.size() == 0) {
+			return null;
+		} else if (funcs.size() > 1) {
+			Log.warn("getFunctionAt(%s) found multiple functions", addr);
+		}
+
+		return funcs.get(0);
+	}
+
+	/**
 	 * @return The function containing the given address, if any.
 	 */
 	public Function getFunctionContaining(Address addr) {
-		return this.programs.stream()
+		var funcs = this.programs.stream()
 			.map(Program::getListing)
 			.map(l -> l.getFunctionContaining(addr))
 			.filter(Objects::nonNull)
-			.findAny()
-			.orElse(null);
+			.collect(Collectors.toList());
+
+		if (funcs.size() == 0) {
+			return null;
+		} else if (funcs.size() > 1) {
+			Log.warn("getFunctionContaining(%s) found multiple functions", addr);
+		}
+
+		return funcs.get(0);
 	}
 
 	/**
 	 * @return The symbol at the given address, if any.
 	 */
 	public Symbol getSymbol(Address addr) {
-		return this.programs.stream()
+		var symbols = this.programs.stream()
 			.map(Program::getSymbolTable)
 			.map(t -> t.getPrimarySymbol(addr))
 			.filter(Objects::nonNull)
-			.findAny()
-			.orElse(null);
+			.collect(Collectors.toList());
+
+		if (symbols.size() == 0) {
+			return null;
+		} else if (symbols.size() > 1) {
+			Log.warn("getSymbol(%s) found multiple symbols", addr);
+		}
+
+		return symbols.get(0);
 	}
 }
