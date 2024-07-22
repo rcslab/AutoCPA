@@ -15,9 +15,7 @@ abstract class AbstractType implements BcpiType {
 		this.ghidra = ghidra;
 
 		var name = ghidra.getName();
-		if (name.endsWith(DataType.CONFLICT_SUFFIX)) {
-			name = name.substring(0, name.length() - DataType.CONFLICT_SUFFIX.length());
-		}
+		name = name.replaceAll("\\.conflict[0-9]*", "");
 		this.name = name;
 
 		this.size = ghidra.getLength();

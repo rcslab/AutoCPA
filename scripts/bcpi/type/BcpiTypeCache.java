@@ -40,12 +40,11 @@ class BcpiTypeCache {
 		public boolean equals(Object obj) {
 			if (obj == this) {
 				return true;
-			} else if (!(obj instanceof ShallowKey)) {
+			} else if (obj instanceof ShallowKey other) {
+				return this.type == other.type;
+			} else {
 				return false;
 			}
-
-			var other = (ShallowKey)obj;
-			return this.type == other.type;
 		}
 
 		@Override
@@ -56,6 +55,29 @@ class BcpiTypeCache {
 
 	/** Global cache of data types known to be equivalent. */
 	static final Cache<ShallowKey, Set<ShallowKey>> EQ_CACHE = new Cache<>(k -> ConcurrentHashMap.newKeySet());
+
+	/**
+	 * Normalize a data type path for deep equality checking.  The
+	 * normalized path is used as a quick hash key such that two data types
+	 * with different normalized paths are never considered equivalent.
+	 */
+	private static String normalizePath(DataType type) {
+		var ret = type.getDataTypePath().getPath();
+
+		// The user-defined type foo::bar will have a category path like
+		// "/DWARF/header.h/foo".  But sometimes (e.g. with forward
+		// declarations), it might be "/DWARF/_UNCATEGORIZED_/foo"
+		// instead.  Allow these types to be de-duplicated by stripping
+		// the filename from the category path.
+		ret = ret.replaceFirst("^/DWARF/[^/]*/", "/DWARF/");
+
+		// Whenever GHIDRA fails to merge two data types with the same
+		// name, it appends .conflict, .conflict1, .conflict2, etc.
+		// Strip this off so we can unify them if possible.
+		ret = ret.replaceAll("\\.conflict[0-9]*", "");
+
+		return ret;
+	}
 
 	/**
 	 * Structural equality checker.
@@ -195,9 +217,13 @@ class BcpiTypeCache {
 		private boolean pushCheck(DataType a, DataType b) {
 			if (a == b) {
 				return true;
-			} else if (!a.getDataTypePath().equals(b.getDataTypePath())) {
-				return false;
 			} else if (a.getLength() != b.getLength()) {
+				return false;
+			}
+
+			var aPath = normalizePath(a);
+			var bPath = normalizePath(b);
+			if (!aPath.equals(bPath)) {
 				return false;
 			}
 
@@ -221,26 +247,27 @@ class BcpiTypeCache {
 	 */
 	private static final class DeepKey {
 		final DataType type;
+		final String path;
 
 		DeepKey(DataType type) {
 			this.type = type;
+			this.path = normalizePath(type);
 		}
 
 		@Override
 		public boolean equals(Object obj) {
 			if (obj == this) {
 				return true;
-			} else if (!(obj instanceof DeepKey)) {
+			} else if (obj instanceof DeepKey other) {
+				return new DeepEq().check(this.type, other.type);
+			} else {
 				return false;
 			}
-
-			var other = (DeepKey)obj;
-			return new DeepEq().check(this.type, other.type);
 		}
 
 		@Override
 		public int hashCode() {
-			return this.type.getDataTypePath().hashCode();
+			return this.path.hashCode();
 		}
 	}
 
