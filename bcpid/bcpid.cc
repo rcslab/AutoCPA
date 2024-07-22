@@ -964,61 +964,38 @@ bcpid_event_handler_callchain(bcpid *b, const struct pmclog_ev *ev)
 	int spec_index = bcpid_get_pmc_counter_index(b, spec);
 
 	int chain_len = cc->pl_npc;
-	bcpid_pc_node *to_node;
-	bcpid_pc_node *from_node;
-
-	if (chain_len == 1) {
-		uint64_t pc = cc->pl_pc[0];
-
-		to_node = bcpid_get_node_from_pc(b, proc, pc);
-		if (to_node) {
-			++to_node->end_ctr[spec_index];
-		} else {
-			bcpid_debug_counter_increment(
-			    b, bcpid_debug_callchain_pc_skip);
-		}
-
+	if (chain_len <= 0) {
 		return;
 	}
 
+	bcpid_pc_node *from_node = bcpid_get_node_from_pc(b, proc,
+	    cc->pl_pc[0]);
+	if (from_node) {
+		++from_node->end_ctr[spec_index];
+	} else {
+		bcpid_debug_counter_increment(b, bcpid_debug_callchain_pc_skip);
+	}
+
 	for (int i = 1; i < chain_len; ++i) {
-		uint64_t to_pc = cc->pl_pc[i - 1];
-		uint64_t from_pc = cc->pl_pc[i];
+		bcpid_pc_node *to_node = from_node;
+		from_node = bcpid_get_node_from_pc(b, proc, cc->pl_pc[i]);
 
-		if (i > 1) {
-			to_node = from_node;
-		} else {
-			to_node = bcpid_get_node_from_pc(b, proc, to_pc);
-		}
-
-		from_node = bcpid_get_node_from_pc(b, proc, from_pc);
 		if (!to_node || !from_node) {
-			bcpid_debug_counter_increment(
-			    b, bcpid_debug_callchain_pc_skip);
+			bcpid_debug_counter_increment(b,
+			    bcpid_debug_callchain_pc_skip);
 			continue;
 		}
 
-		if (i == 1) {
-			++to_node->end_ctr[spec_index];
+		auto map = &to_node->incoming_edge_map;
+		auto [eit, fresh] = map->try_emplace(from_node);
+		auto edge = &eit->second;
+		if (fresh) {
+			memset(edge->hits, 0, sizeof(edge->hits));
+			edge->from = from_node;
+			edge->to = to_node;
+			++b->num_edge;
 		}
-
-		auto *map = &to_node->incoming_edge_map;
-		auto eit = map->find(from_node);
-		bcpid_pc_edge *e;
-		if (eit == map->end()) {
-			bcpid_pc_edge edge;
-			memset(edge.hits, 0, sizeof(edge.hits));
-			edge.from = from_node;
-			edge.to = to_node;
-
-			b->num_edge++;
-			auto res = map->emplace(from_node, edge);
-			e = &res.first->second;
-		} else {
-			e = &eit->second;
-		}
-
-		++e->hits[spec_index];
+		++edge->hits[spec_index];
 	}
 }
 
