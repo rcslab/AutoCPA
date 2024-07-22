@@ -8,6 +8,7 @@ import bcpi.util.BeamState;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -39,38 +40,54 @@ public class StructLayoutOptimizer {
 	 * @return The optimized layout for the structure.
 	 */
 	public Layout optimize() {
-		var insertionOrder = new ArrayList<Field>();
-		var added = new HashSet<Field>();
+		var fields = this.original.getFields();
+		var order = new Field[fields.size()];
+		var added = new BitSet(fields.size());
 
-		// Add fields with fixed positions first
-		for (var field : this.original.getFields()) {
-			if (this.constraints.isFixed(field)) {
-				insertionOrder.add(field);
-				added.add(field);
+		// Add fields with fixed positions at the right places
+		for (var field : fields) {
+			int i = this.constraints.getFixed(field);
+			if (i >= 0) {
+				addField(order, i, field, added);
 			}
 		}
 
 		// Then access patterns from most common to least
+		int i = 0;
 		for (var pattern : patterns.getRankedPatterns(this.original)) {
 			for (var field : pattern.getFields()) {
-				if (added.add(field)) {
-					insertionOrder.add(field);
-				}
+				i = addField(order, i, field, added);
 			}
 		}
 
 		// Add any missing fields we didn't see
 		for (var field : this.original.getFields()) {
-			if (added.add(field)) {
-				insertionOrder.add(field);
-			}
+			i = addField(order, i, field, added);
 		}
 
 		var layout = this.original.getLayout().emptyCopy();
-		return new BeamSearch<>(new BeamLayout(layout, insertionOrder))
-			.search(BcpiConfig.LAYOUT_BEAM_WIDTH, 1)
-			.get(0)
-			.layout;
+		var beam = new BeamSearch<>(new BeamLayout(layout, order))
+			.search(BcpiConfig.LAYOUT_BEAM_WIDTH, 1);
+		if (beam.isEmpty()) {
+			throw new IllegalArgumentException("Unsatisfiable constraints for " + this.original);
+		}
+		return beam.get(0).layout;
+	}
+
+	/**
+	 * Add a field to the insertion order.
+	 */
+	private static int addField(Field[] order, int i, Field field, BitSet added) {
+		int j = field.getOriginalIndex();
+		if (!added.get(j)) {
+			while (order[i] != null) {
+				i++;
+			}
+			order[i++] = field;
+
+			added.set(j);
+		}
+		return i;
 	}
 
 	/**
@@ -78,18 +95,18 @@ public class StructLayoutOptimizer {
 	 */
 	private class BeamLayout implements BeamState<BeamLayout> {
 		final Layout layout;
-		final List<Field> insertionOrder;
+		final Field[] order;
 		final long cost;
 
-		BeamLayout(Layout layout, List<Field> insertionOrder) {
+		BeamLayout(Layout layout, Field[] order) {
 			this.layout = layout;
-			this.insertionOrder = insertionOrder;
+			this.order = order;
 			this.cost = costModel.cost(layout);
 		}
 
 		@Override
 		public boolean isFinal() {
-			return this.layout.getFields().size() == this.insertionOrder.size();
+			return this.layout.getFields().size() == this.order.length;
 		}
 
 		private Layout insertField(Field field, int i) {
@@ -111,12 +128,12 @@ public class StructLayoutOptimizer {
 			}
 
 			var i = this.layout.getFields().size();
-			var field = this.insertionOrder.get(i);
+			var field = this.order[i];
 			return IntStream.rangeClosed(0, i)
 				.parallel()
 				.mapToObj(j -> insertField(field, j))
 				.filter(constraints::check)
-				.map(l -> new BeamLayout(l, this.insertionOrder))
+				.map(l -> new BeamLayout(l, this.order))
 				.collect(Collectors.toList());
 		}
 

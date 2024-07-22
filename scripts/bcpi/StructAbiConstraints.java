@@ -100,7 +100,14 @@ public class StructAbiConstraints {
 	 * @return Whether the given field has its position fixed.
 	 */
 	public boolean isFixed(Field field) {
-		return this.fixed[field.getOriginalIndex()] >= 0;
+		return getFixed(field) >= 0;
+	}
+
+	/**
+	 * @return The fixed position of the given field, or -1.
+	 */
+	public int getFixed(Field field) {
+		return this.fixed[field.getOriginalIndex()];
 	}
 
 	/**
