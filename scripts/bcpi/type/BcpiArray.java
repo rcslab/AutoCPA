@@ -32,6 +32,13 @@ public final class BcpiArray extends AbstractType {
 		return this.wrapped;
 	}
 
+	@Override
+	public int getByteSize() {
+		// Ghidra thinks zero-length arrays are 1 byte long, but we want
+		// them to be 0 bytes
+		return this.count * this.wrapped.getByteSize();
+	}
+
 	/**
 	 * @return The number of array elements.
 	 */
