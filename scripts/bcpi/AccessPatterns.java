@@ -3,6 +3,7 @@ package bcpi;
 import bcpi.type.BcpiStruct;
 import bcpi.util.Counter;
 import bcpi.util.Log;
+import bcpi.util.PcodeUtils;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.CodeBlock;
@@ -58,22 +59,33 @@ public class AccessPatterns {
 			return;
 		}
 
+		var addr = tryUndoSkid(row);
+
+		// Limit the access pattern to fields from the same struct as the cache miss
+		var types = this.refs.getFields(addr)
+			.stream()
+			.map(FieldReference::getOuterType)
+			.collect(Collectors.toSet());
+
 		var reads = new HashMap<BcpiStruct, BitSet>();
 		var writes = new HashMap<BcpiStruct, BitSet>();
 
-		Set<CodeBlock> blocks = getCodeBlocksThrough(row.function, row.address);
+		Set<CodeBlock> blocks = getCodeBlocksThrough(row.function, addr);
 		for (CodeBlock block : blocks) {
-			for (Address address : block.getAddresses(true)) {
-				if (!BcpiConfig.ANALYZE_BACKWARD_FLOW && block.contains(row.address) && address.compareTo(row.address) < 0) {
+			for (var other : block.getAddresses(true)) {
+				if (!BcpiConfig.ANALYZE_BACKWARD_FLOW && block.contains(addr) && other.compareTo(addr) < 0) {
 					// Don't count accesses before the miss
 					continue;
 				}
 
-				for (FieldReference ref : this.refs.getFields(address)) {
+				for (var ref : this.refs.getFields(other)) {
 					var type = ref.getOuterType();
-					if (type instanceof BcpiStruct) {
+					if (!types.contains(type)) {
+						continue;
+					}
+					if (type instanceof BcpiStruct struct) {
 						(ref.isRead() ? reads : writes)
-							.computeIfAbsent((BcpiStruct)type, k -> new BitSet())
+							.computeIfAbsent(struct, k -> new BitSet())
 							.set(ref.getOffset(), ref.getEndOffset());
 					}
 				}
@@ -91,6 +103,20 @@ public class AccessPatterns {
 			AccessPattern pattern = new AccessPattern(struct, read, written);
 			addProjections(pattern, count, row.function);
 		}
+	}
+
+	/**
+	 * Try to undo skid on a cache miss event.
+	 */
+	private Address tryUndoSkid(BcpiDataRow row) {
+		var listing = row.function.getProgram().getListing();
+		var inst = listing.getInstructionAt(row.address);
+		if (inst == null) {
+			return row.address;
+		}
+
+		inst = PcodeUtils.tryUndoSkid(inst, PcodeUtils::isFeasibleCacheMiss);
+		return inst.getAddress();
 	}
 
 	/**
