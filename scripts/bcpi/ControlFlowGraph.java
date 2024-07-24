@@ -151,7 +151,7 @@ public class ControlFlowGraph {
 
 		// Make sure the graph has a unique source
 		CodeBlockVertex source = new CodeBlockVertex("SOURCE");
-		for (CodeBlockVertex vertex : GraphAlgorithms.getSources(this.cfg)) {
+		for (CodeBlockVertex vertex : GraphAlgorithms.getEntryPoints(this.cfg)) {
 			addEdge(source, vertex);
 		}
 		// The function entry point is always a source vertex
@@ -161,7 +161,7 @@ public class ControlFlowGraph {
 
 		// Make sure the graph has a unique sink
 		CodeBlockVertex sink = new CodeBlockVertex("SINK");
-		Set<CodeBlockVertex> sinks = findSinksAndLoops();
+		Set<CodeBlockVertex> sinks = findSinksAndLoops(source);
 		for (CodeBlockVertex vertex : sinks) {
 			addEdge(vertex, sink);
 		}
@@ -207,13 +207,12 @@ public class ControlFlowGraph {
 	 * post-dominator tree.  This function finds the "last" node in every infinite loop so we
 	 * can connect it to the sink.
 	 */
-	private Set<CodeBlockVertex> findSinksAndLoops() {
-		Collection<CodeBlockVertex> sources = GraphAlgorithms.getSources(this.cfg);
-		Set<CodeBlockVertex> seen = new HashSet<>(sources);
+	private Set<CodeBlockVertex> findSinksAndLoops(CodeBlockVertex source) {
+		Set<CodeBlockVertex> seen = new HashSet<>();
+		seen.add(source);
+
 		Set<CodeBlockVertex> results = new HashSet<>();
-		for (CodeBlockVertex source : sources) {
-			findSinksAndLoops(source, new HashSet<>(), seen, results);
-		}
+		findSinksAndLoops(source, new HashSet<>(), seen, results);
 		return results;
 	}
 
