@@ -10,14 +10,12 @@ fi
 mkdir -p "$2"
 
 for FILE in "$1"/*; do
-    if [ -x "$FILE" ]; then
-        DEBUG="/usr/lib/debug/$FILE.debug"
-        OUT="$2/$(basename "$FILE")"
+    DEBUG="/usr/lib/debug/$FILE.debug"
+    OUT="$2/$(basename "$FILE")"
 
-        if [ -e "$DEBUG" ]; then
-            ./scripts/merge-debug.sh "$FILE" "$DEBUG" "$OUT"
-        else
-            cp "$FILE" "$OUT"
-        fi
+    if [ -e "$DEBUG" ]; then
+        ./scripts/merge-debug.sh "$FILE" "$DEBUG" "$OUT"
+    else
+        cp "$FILE" "$OUT"
     fi
 done

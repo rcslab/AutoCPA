@@ -48,7 +48,7 @@ if [ "$FULL" != "${FULL%.csv}" ]; then
 fi
 
 if [ ! -e "$GHIDRA_PROJECTS/$SHORT.gpr" ]; then
-    ghidra_headless "$SHORT" -import "$FULL" -processor x86:LE:64:default -max-cpu 24 -cspec gcc
+    ghidra_headless "$SHORT" -import "$FULL" -max-cpu 24
 fi
 
-ghidra_headless "$SHORT" -processor x86:LE:64:default -max-cpu 24 -cspec gcc -noanalysis -scriptPath "$ROOT/scripts" -postScript "$ANALYSIS.java" "$@"
+ghidra_headless "$SHORT" -max-cpu 24 -noanalysis -scriptPath "$ROOT/scripts" -postScript "$ANALYSIS.java" "$@"
