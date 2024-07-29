@@ -7,7 +7,9 @@ import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileProcess;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.framework.model.Project;
+import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
+import ghidra.program.model.address.AddressFormatException;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.DecoderException;
@@ -118,11 +120,34 @@ public class BcpiDecompiler {
 			var cspec = program.getCompilerSpec();
 			var dtManager = new PcodeDataTypeManager(program, new IdentityNameTransformer());
 			var results = new DecompileResults(func, lang, cspec, dtManager, "", decoder, DecompileProcess.DisposeState.NOT_DISPOSED);
-			return results.getHighFunction();
+			var ret = getHighFunction(results);
+			if (ret != null) {
+				return ret;
+			}
+
+			Log.warn("%s(): Failed to decode cached decompilation, retrying", func);
 		} catch (Exception e) {
 			Throwables.throwIfUnchecked(e);
 			throw new RuntimeException(e);
 		}
+
+		return invokeDecompiler(func);
+	}
+
+	/**
+	 * Get the HighFunction from a DecompileResults instance, and log any
+	 * errors/warnings.
+	 */
+	private static HighFunction getHighFunction(DecompileResults results) {
+		var error = results.getErrorMessage().strip();
+		var func = results.getFunction();
+		if (!results.decompileCompleted()) {
+			Log.error("%s(): %s", func.getName(), error);
+		} else if (!error.isEmpty()) {
+			Log.warn("%s(): %s", func.getName(), error);
+		}
+
+		return results.getHighFunction();
 	}
 
 	/**
@@ -140,15 +165,7 @@ public class BcpiDecompiler {
 		try {
 			var timeout = decomp.getOptions().getDefaultTimeout();
 			var results = decomp.decompileFunction(func, timeout, TaskMonitor.DUMMY);
-
-			String error = results.getErrorMessage().strip();
-			if (!results.decompileCompleted()) {
-				Log.error("%s(): %s", func.getName(), error);
-			} else if (!error.isEmpty()) {
-				Log.warn("%s(): %s", func.getName(), error);
-			}
-
-			return results.getHighFunction();
+			return getHighFunction(results);
 		} finally {
 			queue.offer(decomp);
 		}
@@ -158,6 +175,8 @@ public class BcpiDecompiler {
 	 * A decompiler subclass that caches results.
 	 */
 	private class CachingDecompiler extends DecompInterface {
+		private Function func = null;
+
 		CachingDecompiler(Program program) {
 			toggleCCode(true);
 			toggleSyntaxTree(true);
@@ -173,12 +192,24 @@ public class BcpiDecompiler {
 
 		@Override
 		public DecompileResults decompileFunction(Function func, int timeout, TaskMonitor monitor) {
-			var program = func.getProgram();
-			var addrFactory = program.getAddressFactory();
-			var path = getCachePath(func);
-			this.baseEncodingSet.mainResponse = new CachingDecoder(addrFactory, path);
+			this.func = func;
+			try {
+				return super.decompileFunction(func, timeout, monitor);
+			} finally {
+				this.func = null;
+			}
+		}
 
-			return super.decompileFunction(func, timeout, monitor);
+		@Override
+		protected EncodeDecodeSet setupEncodeDecode(Address addr) throws AddressFormatException {
+			var ret = super.setupEncodeDecode(addr);
+			if (this.func != null) {
+				var program = func.getProgram();
+				var addrFactory = program.getAddressFactory();
+				var path = getCachePath(func);
+				ret.mainResponse = new CachingDecoder(addrFactory, path);
+			}
+			return ret;
 		}
 	}
 
@@ -207,23 +238,32 @@ public class BcpiDecompiler {
 		}
 
 		@Override
-		public void ingestStream(InputStream stream) throws IOException {
+		public void ingestStreamToNextTerminator(InputStream stream) throws IOException {
 			// Ingest bytes from the stream up to (and including) the first 0 byte.
 			var chunk = new ByteArrayOutputStream();
 			while (true) {
 				int b = stream.read();
-				if (b < 0) {
+				if (b <= 0) {
 					break;
 				}
-
 				chunk.write(b);
-				if (b == 0) {
-					break;
-				}
 			}
 			chunk.writeTo(this.buffer);
 
-			super.ingestStream(new ByteArrayInputStream(chunk.toByteArray()));
+			super.ingestStreamToNextTerminator(new ByteArrayInputStream(chunk.toByteArray()));
+		}
+
+		@Override
+		public void ingestStream(InputStream stream) throws IOException {
+			var bytes = stream.readAllBytes();
+			this.buffer.writeBytes(bytes);
+			super.ingestStream(new ByteArrayInputStream(bytes));
+		}
+
+		@Override
+		public void ingestBytes(byte[] bytes, int off, int len) throws IOException {
+			this.buffer.write(bytes, off, len);
+			super.ingestBytes(bytes, off, len);
 		}
 
 		@Override
