@@ -84,9 +84,14 @@ public class FieldReferences {
 	 * Compute data flow facts for a specific function.
 	 */
 	private void computeDataFlow(int depth, HighFunction highFunc, DataFlow<BcpiDomain> dataFlow) {
-		Iterable<PcodeOpAST> ops = highFunc::getPcodeOps;
-		for (PcodeOp op : ops) {
-			processPcodeOp(depth, highFunc, dataFlow, op);
+		try {
+			Iterable<PcodeOpAST> ops = highFunc::getPcodeOps;
+			for (PcodeOp op : ops) {
+				processPcodeOp(depth, highFunc, dataFlow, op);
+			}
+		} catch (Throwable e) {
+			Log.error("While processing %s: %s", highFunc.getFunction(), e.getMessage());
+			throw e;
 		}
 	}
 

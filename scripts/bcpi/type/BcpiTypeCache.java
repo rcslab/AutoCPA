@@ -1,6 +1,7 @@
 package bcpi.type;
 
 import bcpi.util.Cache;
+import bcpi.util.Log;
 
 import ghidra.program.model.data.Array;
 import ghidra.program.model.data.BitFieldDataType;
@@ -13,6 +14,7 @@ import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.TypeDef;
 import ghidra.program.model.data.Union;
+import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.pcode.PartialUnion;
 
 import java.util.ArrayDeque;
@@ -278,6 +280,10 @@ class BcpiTypeCache {
 	 * @return The cached BcpiType for this Ghidra type.
 	 */
 	static BcpiType get(DataType type) {
+		if (type == null) {
+			Log.warn("Replacing null DataType with void");
+			type = VoidDataType.dataType;
+		}
 		return SHALLOW_CACHE.get(new ShallowKey(type));
 	}
 
