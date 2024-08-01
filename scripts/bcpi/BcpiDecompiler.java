@@ -57,7 +57,10 @@ public class BcpiDecompiler {
 	 * @return The path to the cached decompilation of the given function.
 	 */
 	private Path getCachePath(Function func) {
-		return this.diskCache.resolve(String.valueOf(func.getID()));
+		// Function IDs are only unique within a Program
+		long progId = func.getProgram().getUniqueProgramID();
+		long funcId = func.getID();
+		return this.diskCache.resolve(progId + "-" + funcId);
 	}
 
 	/**
