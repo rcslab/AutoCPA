@@ -5,22 +5,29 @@ import bcpi.util.Log;
 
 import ghidra.program.model.data.Array;
 import ghidra.program.model.data.BitFieldDataType;
+import ghidra.program.model.data.BuiltInDataType;
+import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.Composite;
 import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.DataTypePath;
 import ghidra.program.model.data.Enum;
 import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.Pointer;
+import ghidra.program.model.data.ProgramBasedDataTypeManager;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.data.TypeDef;
 import ghidra.program.model.data.Union;
 import ghidra.program.model.data.VoidDataType;
+import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.PartialUnion;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -85,22 +92,31 @@ class BcpiTypeCache {
 	 * Structural equality checker.
 	 */
 	private static final class DeepEq {
+		/** The two top-level types being compared. */
+		private final DataType typeA;
+		private final DataType typeB;
 		/** Local cache of known equivalences. */
 		private final Map<ShallowKey, Set<ShallowKey>> cache = new HashMap<>();
+		/** Work lists. */
 		private final ArrayDeque<DataType> todoA = new ArrayDeque<>();
 		private final ArrayDeque<DataType> todoB = new ArrayDeque<>();
+
+		DeepEq(DataType a, DataType b) {
+			this.typeA = a;
+			this.typeB = b;
+		}
 
 		/**
 		 * @return Whether a and b are structurally equivalent.
 		 */
-		boolean check(DataType a, DataType b) {
-			if (!pushCheck(a, b)) {
+		boolean check() {
+			if (!pushCheck(this.typeA, this.typeB)) {
 				return false;
 			}
 
 			while (!this.todoA.isEmpty()) {
-				a = this.todoA.removeFirst();
-				b = this.todoB.removeFirst();
+				var a = this.todoA.removeFirst();
+				var b = this.todoB.removeFirst();
 				if (!checkNext(a, b)) {
 					return false;
 				}
@@ -124,41 +140,79 @@ class BcpiTypeCache {
 			bEq.add(aKey);
 
 			if (a instanceof Array aa) {
-				return (b instanceof Array bb) && checkArray(aa, bb);
+				if (b instanceof Array bb) {
+					return checkArray(aa, bb);
+				}
 			} else if (a instanceof BitFieldDataType aa) {
-				return (b instanceof BitFieldDataType bb) && checkBitField(aa, bb);
+				if (b instanceof BitFieldDataType bb) {
+					return checkBitField(aa, bb);
+				}
 			} else if (a instanceof FunctionDefinition aa) {
-				return (b instanceof FunctionDefinition bb) && checkFunction(aa, bb);
+				if (b instanceof FunctionDefinition bb) {
+					return checkFunction(aa, bb);
+				}
 			} else if (a instanceof PartialUnion aa) {
-				return (b instanceof PartialUnion bb) && checkPartialUnion(aa, bb);
+				if (b instanceof PartialUnion bb) {
+					return checkPartialUnion(aa, bb);
+				}
 			} else if (a instanceof Pointer aa) {
-				return (b instanceof Pointer bb) && checkPointer(aa, bb);
+				if (b instanceof Pointer bb) {
+					return checkPointer(aa, bb);
+				}
 			} else if (a instanceof Structure aa) {
-				return (b instanceof Structure bb) && checkComposite(aa, bb);
+				if (b instanceof Structure bb) {
+					return checkComposite(aa, bb);
+				}
 			} else if (a instanceof TypeDef aa) {
-				return (b instanceof TypeDef bb) && checkTypeDef(aa, bb);
+				if (b instanceof TypeDef bb) {
+					return checkTypeDef(aa, bb);
+				}
 			} else if (a instanceof Union aa) {
-				return (b instanceof Union bb) && checkComposite(aa, bb);
+				if (b instanceof Union bb) {
+					return checkComposite(aa, bb);
+				}
+			} else if (a instanceof BuiltInDataType aa) {
+				// Check this last because pointers can also be built-in
+				if (b instanceof BuiltInDataType bb) {
+					return checkBuiltIn(aa, bb);
+				}
 			} else {
+				Log.trace("Don't know how to compare `%s` and `%s`", a.getClass().getSimpleName(), b.getClass().getSimpleName());
 				return true;
 			}
+
+			return failure(a, b, "kind `%s` != `%s`", a.getClass().getSimpleName(), b.getClass().getSimpleName());
 		}
 
 		private boolean checkArray(Array a, Array b) {
-			if (a.getNumElements() != b.getNumElements()) {
-				return false;
+			var aCount = a.getNumElements();
+			var bCount = b.getNumElements();
+			if (aCount != bCount) {
+				return failure(a, b, "count %d != %d", aCount, bCount);
 			}
+
 			return pushCheck(a.getDataType(), b.getDataType());
 		}
 
 		private boolean checkBitField(BitFieldDataType a, BitFieldDataType b) {
-			if (a.getDeclaredBitSize() != b.getDeclaredBitSize()) {
-				return false;
+			var aBits = a.getDeclaredBitSize();
+			var bBits = b.getDeclaredBitSize();
+			if (aBits != bBits) {
+				return failure(a, b, "bit size %d != %d", aBits, bBits);
 			}
-			if (a.getBitOffset() != b.getBitOffset()) {
-				return false;
+
+			var aOffset = a.getBitOffset();
+			var bOffset = b.getBitOffset();
+			if (aOffset != bOffset) {
+				return failure(a, b, "bit offset %d != %d", aOffset, bOffset);
 			}
+
 			return pushCheck(a.getBaseDataType(), b.getBaseDataType());
+		}
+
+		private boolean checkBuiltIn(BuiltInDataType a, BuiltInDataType b) {
+			// We already know the name and size are the same
+			return true;
 		}
 
 		private boolean checkPointer(Pointer a, Pointer b) {
@@ -169,7 +223,7 @@ class BcpiTypeCache {
 			var aParams = a.getArguments();
 			var bParams = b.getArguments();
 			if (aParams.length != bParams.length) {
-				return false;
+				return failure(a, b, "parameter count %d != %d", aParams.length, bParams.length);
 			}
 
 			if (!pushCheck(a.getReturnType(), b.getReturnType())) {
@@ -191,15 +245,16 @@ class BcpiTypeCache {
 			var aFields = a.getDefinedComponents();
 			var bFields = b.getDefinedComponents();
 			if (aFields.length != bFields.length) {
-				return false;
+				return failure(a, b, "field count %d != %d", aFields.length, bFields.length);
 			}
 
 			for (int i = 0; i < aFields.length; ++i) {
 				var af = aFields[i];
 				var bf = bFields[i];
 				if (af.getOffset() != bf.getOffset()) {
-					return false;
+					return failure(a, b, "field %d offset %d != %d", i, af.getOffset(), bf.getOffset());
 				}
+
 				if (!pushCheck(af.getDataType(), bf.getDataType())) {
 					return false;
 				}
@@ -219,14 +274,18 @@ class BcpiTypeCache {
 		private boolean pushCheck(DataType a, DataType b) {
 			if (a == b) {
 				return true;
-			} else if (a.getLength() != b.getLength()) {
-				return false;
+			}
+
+			var aSize = a.getLength();
+			var bSize = b.getLength();
+			if (aSize != bSize) {
+				return failure(a, b, "size %d != %d", aSize, bSize);
 			}
 
 			var aPath = normalizePath(a);
 			var bPath = normalizePath(b);
 			if (!aPath.equals(bPath)) {
-				return false;
+				return failure(a, b, "qualified name `%s` != `%s`", aPath, bPath);
 			}
 
 			var aKey = new ShallowKey(a);
@@ -241,6 +300,42 @@ class BcpiTypeCache {
 			this.todoA.addLast(a);
 			this.todoB.addLast(b);
 			return true;
+		}
+
+		/**
+		 * Fail to unify two types (and possibly log a message).
+		 */
+		private boolean failure(DataType a, DataType b, String format, Object... args) {
+			if (!Log.Level.TRACE.isEnabled()) {
+				return false;
+			}
+
+			// Don't warn about partial unions
+			if (this.typeA instanceof PartialUnion || this.typeB instanceof PartialUnion) {
+				return false;
+			}
+
+			// Don't warn about bit-fields
+			if (this.typeA instanceof BitFieldDataType || this.typeB instanceof BitFieldDataType) {
+				return false;
+			}
+
+			var topA = new StringBuilder();
+			var topB = new StringBuilder();
+			describeTypes(this.typeA, this.typeB, topA, topB);
+
+			var aStr = new StringBuilder();
+			var bStr = new StringBuilder();
+			describeTypes(a, b, aStr, bStr);
+
+			Log.trace("Failed to unify `%s` and `%s`\n"
+				  + "    because `%s` and `%s` are different\n"
+				  + "    because %s\n",
+				  topA, topB,
+				  aStr, bStr,
+				  String.format(format, args));
+
+			return false;
 		}
 	}
 
@@ -261,7 +356,7 @@ class BcpiTypeCache {
 			if (obj == this) {
 				return true;
 			} else if (obj instanceof DeepKey other) {
-				return new DeepEq().check(this.type, other.type);
+				return new DeepEq(this.type, other.type).check();
 			} else {
 				return false;
 			}
@@ -281,10 +376,58 @@ class BcpiTypeCache {
 	 */
 	static BcpiType get(DataType type) {
 		if (type == null) {
-			Log.warn("Replacing null DataType with void");
+			Log.trace("Replacing null DataType with void");
 			type = VoidDataType.dataType;
 		}
 		return SHALLOW_CACHE.get(new ShallowKey(type));
+	}
+
+	/**
+	 * Generate strings describing two Ghidra types, including any relevant differences.
+	 */
+	static void describeTypes(DataType a, DataType b, StringBuilder aStr, StringBuilder bStr) {
+		var aProg = getProgram(a);
+		var bProg = getProgram(b);
+		if (!Objects.equals(aProg, bProg)) {
+			// Show the originating program names, if different
+			if (aProg != null) {
+				aStr.append(aProg.getName()).append("::");
+			}
+			if (bProg != null) {
+				bStr.append(bProg.getName()).append("::");
+			}
+		}
+
+		var aPath = a.getDataTypePath();
+		var bPath = b.getDataTypePath();
+
+		var aCat = aPath.getCategoryPath();
+		var bCat = bPath.getCategoryPath();
+		for (var element : aCat.getPathElements()) {
+			aStr.append(CategoryPath.unescapeString(element)).append("::");
+		}
+		if (aCat.equals(bCat)) {
+			bStr.append("<...>::");
+		} else {
+			for (var element : bCat.getPathElements()) {
+				bStr.append(CategoryPath.unescapeString(element)).append("::");
+			}
+		}
+
+		aStr.append(aPath.getDataTypeName());
+		bStr.append(bPath.getDataTypeName());
+	}
+
+	/**
+	 * @return The Program that defines a DataType, if any.
+	 */
+	private static Program getProgram(DataType type) {
+		var manager = type.getDataTypeManager();
+		if (manager instanceof ProgramBasedDataTypeManager pbdtm) {
+			return pbdtm.getProgram();
+		} else {
+			return null;
+		}
 	}
 
 	/**
