@@ -11,6 +11,7 @@ import java.util.function.Function;
 public final class Cache<K, V> {
 	private final ConcurrentMap<K, Task> map = new ConcurrentHashMap<>();
 	private final Function<K, V> func;
+	private final boolean locked;
 
 	private final class Task extends RecursiveTask<V> {
 		private final K key;
@@ -24,18 +25,39 @@ public final class Cache<K, V> {
 		}
 	}
 
+	private Cache(Function<K, V> func, boolean locked) {
+		this.func = func;
+		this.locked = locked;
+	}
+
 	/**
-	 * Create a cache.
+	 * Create a locked cache.
+	 *
+	 * The given function will be invoked at most once for each key.
+	 * Concurrent queries for the same key will block.
 	 *
 	 * @param func
 	 *         The function that computes values from keys.
 	 */
-	public Cache(Function<K, V> func) {
-		this.func = func;
+	public static <K, V> Cache<K, V> locked(Function<K, V> func) {
+		return new Cache<>(func, true);
 	}
 
 	/**
-	 * @retur The (possibly cached) value for this key.
+	 * Create an unlocked cache.
+	 *
+	 * The function may be invoked multiple times if the same key is queried
+	 * concurrently, but only one return value will be used.
+	 *
+	 * @param func
+	 *         The function that computes values from keys.
+	 */
+	public static <K, V> Cache<K, V> unlocked(Function<K, V> func) {
+		return new Cache<>(func, false);
+	}
+
+	/**
+	 * @return The (possibly cached) value for this key.
 	 */
 	public V get(K key) {
 		var task = this.map.get(key);
@@ -44,13 +66,21 @@ public final class Cache<K, V> {
 		}
 
 		var newTask = new Task(key);
+
+		if (!this.locked) {
+			// Compute the value (potentially concurrently with other lookups for key)
+			newTask.invoke();
+		}
+
 		task = this.map.putIfAbsent(key, newTask);
 		if (task == null) {
-			// We won the race, compute inline
-			return newTask.invoke();
-		} else {
-			// We lost the race, wait
-			return task.join();
+			task = newTask;
+			if (this.locked) {
+				// We won the race, so we are the unique task for this key
+				task.invoke();
+			}
 		}
+
+		return task.join();
 	}
 }

@@ -64,7 +64,7 @@ class BcpiTypeCache {
 	}
 
 	/** Global cache of data types known to be equivalent. */
-	static final Cache<ShallowKey, Set<ShallowKey>> EQ_CACHE = new Cache<>(k -> ConcurrentHashMap.newKeySet());
+	static final Cache<ShallowKey, Set<ShallowKey>> EQ_CACHE = Cache.unlocked(k -> ConcurrentHashMap.newKeySet());
 
 	/**
 	 * Normalize a data type path for deep equality checking.  The
@@ -424,13 +424,15 @@ class BcpiTypeCache {
 		}
 	}
 
-	private static final Cache<ShallowKey, BcpiType> SHALLOW_CACHE = new Cache<>(BcpiTypeCache::shallowMiss);
-	private static final Cache<DeepKey, BcpiType> DEEP_CACHE = new Cache<>(BcpiTypeCache::deepMiss);
+	private static final Cache<ShallowKey, DataType> CANONICAL_CACHE = Cache.unlocked(BcpiTypeCache::canonicalMiss);
+	private static final Cache<ShallowKey, BcpiType> SHALLOW_CACHE = Cache.unlocked(BcpiTypeCache::shallowMiss);
+	private static final Cache<DeepKey, BcpiType> DEEP_CACHE = Cache.unlocked(BcpiTypeCache::deepMiss);
 
 	/**
 	 * @return The cached BcpiType for this Ghidra type.
 	 */
 	static BcpiType get(DataType type) {
+		type = canonicalize(type);
 		return SHALLOW_CACHE.get(new ShallowKey(type));
 	}
 
@@ -455,6 +457,12 @@ class BcpiTypeCache {
 	 * Apply some pre-unification fixups to types.
 	 */
 	static DataType canonicalize(DataType type) {
+		return CANONICAL_CACHE.get(new ShallowKey(type));
+	}
+
+	private static DataType canonicalMiss(ShallowKey key) {
+		var type = key.type;
+
 		if (type == null) {
 			Log.trace("Replacing null DataType with void");
 			type = VoidDataType.dataType;
@@ -526,7 +534,9 @@ class BcpiTypeCache {
 			aStr.append(CategoryPath.unescapeString(element)).append("::");
 		}
 		if (aCat.equals(bCat)) {
-			bStr.append("<...>::");
+			if (aCat.getPathElements().length > 0) {
+				bStr.append("<...>::");
+			}
 		} else {
 			for (var element : bCat.getPathElements()) {
 				bStr.append(CategoryPath.unescapeString(element)).append("::");
@@ -573,8 +583,7 @@ class BcpiTypeCache {
 	 * Search the deep-equivalence cache on a shallow miss.
 	 */
 	private static BcpiType shallowMiss(ShallowKey key) {
-		var type = canonicalize(key.type);
-		return DEEP_CACHE.get(new DeepKey(type));
+		return DEEP_CACHE.get(new DeepKey(key.type));
 	}
 
 	/**
