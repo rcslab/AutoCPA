@@ -78,7 +78,7 @@ class BcpiTypeCache {
 		// declarations), it might be "/DWARF/_UNCATEGORIZED_/foo"
 		// instead.  Allow these types to be de-duplicated by stripping
 		// the filename from the category path.
-		ret = ret.replaceFirst("^/DWARF/[^/]*/", "/DWARF/");
+		ret = ret.replaceFirst("^/DWARF/([^\\\\/]|\\\\/)*/", "/DWARF/");
 
 		// Whenever GHIDRA fails to merge two data types with the same
 		// name, it appends .conflict, .conflict1, .conflict2, etc.
