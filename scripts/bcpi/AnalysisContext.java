@@ -24,6 +24,8 @@ import java.util.stream.Collectors;
  * An analysis context manages one or more programs that are linked together.
  */
 public class AnalysisContext {
+	private static AnalysisContext CURRENT = null;
+
 	private final Project project;
 	private final TaskMonitor monitor;
 	private final Collection<Program> programs;
@@ -36,6 +38,18 @@ public class AnalysisContext {
 		this.programs = findPrograms();
 		this.decomp = new BcpiDecompiler(project);
 		this.linker = new Linker(this.programs);
+
+		if (CURRENT == null) {
+			CURRENT = this;
+		}
+	}
+
+	/**
+	 * @return The current analysis context (may be null during initialization; prefer to pass
+	 *         the current instance around if possible).
+	 */
+	public static AnalysisContext current() {
+		return CURRENT;
 	}
 
 	private Collection<Program> findPrograms() throws Exception {

@@ -1,5 +1,6 @@
 package bcpi.type;
 
+import bcpi.AnalysisContext;
 import bcpi.util.Cache;
 import bcpi.util.Log;
 
@@ -443,33 +444,39 @@ class BcpiTypeCache {
 
 		// Try to resolve forward-declared types to a complete definition
 		if (isIncomplete(type)) {
-			var dtm = type.getDataTypeManager();
 			var name = type.getDataTypePath().getDataTypeName();
 			var candidates = new ArrayList<DataType>();
+			var dtm = type.getDataTypeManager();
 			if (dtm != null) {
 				dtm.findDataTypes(name, candidates);
 			}
-
 			candidates.removeIf(t -> isIncomplete(t));
 
-			switch (candidates.size()) {
-			case 0:
-				Log.trace("Could not resolve incomplete type `%s`", fullyQualifiedName(type));
-				break;
+			// If we couldn't find it in the same program, look in the rest
+			if (candidates.isEmpty()) {
+				var ctx = AnalysisContext.current();
+				if (ctx != null) {
+					for (var prog : ctx.getPrograms()) {
+						prog.getDataTypeManager().findDataTypes(name, candidates);
+					}
+				}
+			}
+			candidates.removeIf(t -> isIncomplete(t));
 
-			case 1:
+			if (candidates.isEmpty()) {
+				Log.trace("Could not resolve incomplete type `%s`", fullyQualifiedName(type));
+			} else {
 				if (Log.Level.TRACE.isEnabled()) {
 					var before = new StringBuilder();
 					var after = new StringBuilder();
 					describeTypes(type, candidates.get(0), before, after);
-					Log.trace("Replacing `%s` with `%s`", before, after);
+					if (candidates.size() == 1) {
+						Log.trace("Replacing `%s` with `%s`", before, after);
+					} else {
+						Log.trace("Replacing `%s` with `%s` (%d candidates)", before, after, candidates.size());
+					}
 				}
 				type = candidates.get(0);
-				break;
-
-			default:
-				Log.trace("Incomplete type `%s` is ambiguous", fullyQualifiedName(type));
-				break;
 			}
 		}
 
