@@ -1,11 +1,43 @@
 package bcpi.util;
 
+import bcpi.BcpiConfig;
+
 import com.google.common.base.Throwables;
 
 /**
  * Simple logging class with formatting support.
  */
 public final class Log {
+	/**
+	 * Available log levels.
+	 */
+	public enum Level {
+		TRACE,
+		DEBUG,
+		INFO,
+		WARN,
+		ERROR;
+
+		/**
+		 * @return Whether this log level is enabled.
+		 */
+		public boolean isEnabled() {
+			return this.ordinal() >= LEVEL.ordinal();
+		}
+	}
+
+	/** The current log level (from $BCPI_LOG_LEVEL). */
+	public static final Level LEVEL = parseLevel(BcpiConfig.LOG_LEVEL);
+
+	private static Level parseLevel(String level) {
+		try {
+			return Level.valueOf(BcpiConfig.LOG_LEVEL);
+		} catch (IllegalArgumentException e) {
+			Log.error(e);
+			return Level.DEBUG;
+		}
+	}
+
 	private static final StackWalker WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
 	private static final TtyErrorLogger LOGGER = TtyErrorLogger.INSTANCE;
 
