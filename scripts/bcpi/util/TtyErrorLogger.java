@@ -1,6 +1,6 @@
 package bcpi.util;
 
-import bcpi.BcpiConfig;
+import bcpi.util.Log.Level;
 
 import ghidra.util.ErrorLogger;
 
@@ -11,25 +11,6 @@ import com.google.common.base.Throwables;
  */
 public final class TtyErrorLogger implements ErrorLogger {
 	public static final TtyErrorLogger INSTANCE = new TtyErrorLogger();
-
-	private enum Level {
-		TRACE,
-		DEBUG,
-		INFO,
-		WARN,
-		ERROR,
-	}
-
-	private static final Level LEVEL = parseLevel(BcpiConfig.LOG_LEVEL);
-
-	private static Level parseLevel(String level) {
-		try {
-			return Level.valueOf(BcpiConfig.LOG_LEVEL);
-		} catch (IllegalArgumentException e) {
-			Log.error(e);
-			return Level.DEBUG;
-		}
-	}
 
 	private TtyErrorLogger() {
 	}
@@ -85,33 +66,36 @@ public final class TtyErrorLogger implements ErrorLogger {
 		}
 	}
 
-	private synchronized void log(Level level, Object src, Object msg, Throwable e) {
-		if (level.ordinal() < LEVEL.ordinal()) {
+	private void log(Level level, Object src, Object msg, Throwable e) {
+		if (!level.isEnabled()) {
 			return;
 		}
 
-		String tag;
-		if (src instanceof String s) {
-			tag = s;
-		} else if (src instanceof Class<?> c) {
-			tag = c.getSimpleName();
-		} else {
-			tag = src.getClass().getSimpleName();
-		}
+		// Avoid interleaved lines
+		synchronized (this) {
+			String tag;
+			if (src instanceof String s) {
+				tag = s;
+			} else if (src instanceof Class<?> c) {
+				tag = c.getSimpleName();
+			} else {
+				tag = src.getClass().getSimpleName();
+			}
 
-		var str = String.valueOf(msg);
-		if (str.contains("\n")) {
-			header(level, tag, "");
-			str.lines()
-				.forEach(line -> trailer(level, line));
-		} else {
-			header(level, tag, str);
-		}
+			var str = String.valueOf(msg);
+			if (str.contains("\n")) {
+				header(level, tag, "");
+				str.lines()
+					.forEach(line -> trailer(level, line));
+			} else {
+				header(level, tag, str);
+			}
 
-		if (e != null) {
-			Throwables.getStackTraceAsString(e)
-				.lines()
-				.forEach(line -> stackTrace(level, line));
+			if (e != null) {
+				Throwables.getStackTraceAsString(e)
+					.lines()
+					.forEach(line -> stackTrace(level, line));
+			}
 		}
 	}
 
