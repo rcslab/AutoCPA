@@ -73,11 +73,7 @@ class BcpiTypeCache {
 	private static String normalizePath(DataType type) {
 		var ret = type.getDataTypePath().getPath();
 
-		// The user-defined type foo::bar will have a category path like
-		// "/DWARF/header.h/foo".  But sometimes (e.g. with forward
-		// declarations), it might be "/DWARF/_UNCATEGORIZED_/foo"
-		// instead.  Allow these types to be de-duplicated by stripping
-		// the filename from the category path.
+		// Ignore the file that defined the path
 		ret = ret.replaceFirst("^/DWARF/([^\\\\/]|\\\\/)*/", "/DWARF/");
 
 		// Whenever GHIDRA fails to merge two data types with the same
@@ -311,6 +307,12 @@ class BcpiTypeCache {
 				return true;
 			}
 
+			a = canonicalize(a);
+			b = canonicalize(b);
+			if (a == b) {
+				return true;
+			}
+
 			var aSize = a.getLength();
 			var bSize = b.getLength();
 			if (aSize != bSize) {
@@ -410,11 +412,68 @@ class BcpiTypeCache {
 	 * @return The cached BcpiType for this Ghidra type.
 	 */
 	static BcpiType get(DataType type) {
+		return SHALLOW_CACHE.get(new ShallowKey(type));
+	}
+
+	/**
+	 * @return Whether a data type is incomplete (e.g. forward-declared).
+	 */
+	private static boolean isIncomplete(DataType type) {
+		// Don't worry about pointers etc.
+		if (!(type instanceof Composite)) {
+			return false;
+		}
+
+		// Forward-declared types end up with a category path like
+		// /DWARF/_UNCATEGORIZED_/foo
+		var path = type.getDataTypePath().getCategoryPath().getPathElements();
+		return path.length >= 2
+			&& path[0].equals("DWARF")
+			&& path[1].equals("_UNCATEGORIZED_");
+	}
+
+	/**
+	 * Apply some pre-unification fixups to types.
+	 */
+	static DataType canonicalize(DataType type) {
 		if (type == null) {
 			Log.trace("Replacing null DataType with void");
 			type = VoidDataType.dataType;
 		}
-		return SHALLOW_CACHE.get(new ShallowKey(type));
+
+		// Try to resolve forward-declared types to a complete definition
+		if (isIncomplete(type)) {
+			var dtm = type.getDataTypeManager();
+			var name = type.getDataTypePath().getDataTypeName();
+			var candidates = new ArrayList<DataType>();
+			if (dtm != null) {
+				dtm.findDataTypes(name, candidates);
+			}
+
+			candidates.removeIf(t -> isIncomplete(t));
+
+			switch (candidates.size()) {
+			case 0:
+				Log.trace("Could not resolve incomplete type `%s`", fullyQualifiedName(type));
+				break;
+
+			case 1:
+				if (Log.Level.TRACE.isEnabled()) {
+					var before = new StringBuilder();
+					var after = new StringBuilder();
+					describeTypes(type, candidates.get(0), before, after);
+					Log.trace("Replacing `%s` with `%s`", before, after);
+				}
+				type = candidates.get(0);
+				break;
+
+			default:
+				Log.trace("Incomplete type `%s` is ambiguous", fullyQualifiedName(type));
+				break;
+			}
+		}
+
+		return type;
 	}
 
 	/**
@@ -454,6 +513,26 @@ class BcpiTypeCache {
 	}
 
 	/**
+	 * @return A human-readable fully-qualified type name.
+	 */
+	private static String fullyQualifiedName(DataType type) {
+		var entries = new ArrayList<String>();
+
+		var program = getProgram(type);
+		if (program != null) {
+			entries.add(program.getName());
+		}
+
+		for (var entry : type.getCategoryPath().getPathElements()) {
+			entries.add(CategoryPath.unescapeString(entry));
+		}
+
+		entries.add(type.getDataTypePath().getDataTypeName());
+
+		return String.join("::", entries);
+	}
+
+	/**
 	 * @return The Program that defines a DataType, if any.
 	 */
 	private static Program getProgram(DataType type) {
@@ -469,7 +548,8 @@ class BcpiTypeCache {
 	 * Search the deep-equivalence cache on a shallow miss.
 	 */
 	private static BcpiType shallowMiss(ShallowKey key) {
-		return DEEP_CACHE.get(new DeepKey(key.type));
+		var type = canonicalize(key.type);
+		return DEEP_CACHE.get(new DeepKey(type));
 	}
 
 	/**
