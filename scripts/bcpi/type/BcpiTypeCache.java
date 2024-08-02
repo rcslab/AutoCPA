@@ -296,7 +296,7 @@ class BcpiTypeCache {
 		}
 
 		private boolean checkTypeDef(TypeDef a, TypeDef b) {
-			return pushCheck(a.getBaseDataType(), b.getBaseDataType());
+			return pushCheck(a.getDataType(), b.getDataType());
 		}
 
 		private boolean checkPartialUnion(PartialUnion a, PartialUnion b) {
