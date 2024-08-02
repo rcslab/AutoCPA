@@ -287,12 +287,30 @@ class BcpiTypeCache {
 					return failure(a, b, "field %d name `%s`' != `%s`'", i, afName, bfName);
 				}
 
-				if (!pushCheck(af.getDataType(), bf.getDataType())) {
+				// Accept layout-compatible types for fields, even if the nominal
+				// types don't match
+				var afType = resolveTypeDefs(af.getDataType());
+				var bfType = resolveTypeDefs(bf.getDataType());
+
+				while (afType instanceof Pointer ap && bfType instanceof Pointer bp) {
+					afType = resolveTypeDefs(ap.getDataType());
+					bfType = resolveTypeDefs(bp.getDataType());
+				}
+
+				if (!pushCheck(afType, bfType)) {
 					return false;
 				}
 			}
 
 			return true;
+		}
+
+		private DataType resolveTypeDefs(DataType type) {
+			if (type instanceof TypeDef td) {
+				return td.getBaseDataType();
+			} else {
+				return type;
+			}
 		}
 
 		private boolean checkTypeDef(TypeDef a, TypeDef b) {
