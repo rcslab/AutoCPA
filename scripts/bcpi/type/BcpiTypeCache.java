@@ -147,6 +147,10 @@ class BcpiTypeCache {
 				if (b instanceof BitFieldDataType bb) {
 					return checkBitField(aa, bb);
 				}
+			} else if (a instanceof Enum aa) {
+				if (b instanceof Enum bb) {
+					return checkEnum(aa, bb);
+				}
 			} else if (a instanceof FunctionDefinition aa) {
 				if (b instanceof FunctionDefinition bb) {
 					return checkFunction(aa, bb);
@@ -212,6 +216,31 @@ class BcpiTypeCache {
 
 		private boolean checkBuiltIn(BuiltInDataType a, BuiltInDataType b) {
 			// We already know the name and size are the same
+			return true;
+		}
+
+		private boolean checkEnum(Enum a, Enum b) {
+			var aCount = a.getCount();
+			var bCount = b.getCount();
+			if (aCount != bCount) {
+				return failure(a, b, "count %d != %d", aCount, bCount);
+			}
+
+			var aNames = a.getNames();
+			var bNames = b.getNames();
+
+			for (int i = 0; i < aCount; ++i) {
+				if (!Objects.equals(aNames[i], bNames[i])) {
+					return failure(a, b, "enumerator %d name `%s` != `%s`", aNames[i], bNames[i]);
+				}
+
+				var aValue = a.getValue(aNames[i]);
+				var bValue = b.getValue(bNames[i]);
+				if (aValue != bValue) {
+					return failure(a, b, "enumerator `%s` value %d != %d", aNames[i], aValue, bValue);
+				}
+			}
+
 			return true;
 		}
 
