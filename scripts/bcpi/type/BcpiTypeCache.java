@@ -27,6 +27,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -63,27 +65,169 @@ class BcpiTypeCache {
 		}
 	}
 
-	/** Global cache of data types known to be equivalent. */
-	static final Cache<ShallowKey, Set<ShallowKey>> EQ_CACHE = Cache.unlocked(k -> ConcurrentHashMap.newKeySet());
+	/**
+	 * Type kinds.
+	 */
+	private enum Kind {
+		ARRAY,
+		BITFIELD,
+		BUILTIN,
+		ENUM,
+		FUNCTION,
+		POINTER,
+		STRUCT,
+		TYPEDEF,
+		UNION,
+		UNKNOWN;
+
+		static Kind of(DataType type) {
+			if (type instanceof Array) {
+				return ARRAY;
+			} else if (type instanceof BitFieldDataType) {
+				return BITFIELD;
+			} else if (type instanceof Enum) {
+				return ENUM;
+			} else if (type instanceof FunctionDefinition) {
+				return FUNCTION;
+			} else if (type instanceof Pointer) {
+				return POINTER;
+			} else if (type instanceof Structure) {
+				return STRUCT;
+			} else if (type instanceof TypeDef) {
+				return TYPEDEF;
+			} else if (type instanceof Union) {
+				return UNION;
+			} else if (type instanceof BuiltInDataType) {
+				return BUILTIN;
+			} else {
+				return UNKNOWN;
+			}
+		}
+
+		@Override
+		public String toString() {
+			return name().toLowerCase(Locale.ROOT);
+		}
+	}
 
 	/**
-	 * Normalize a data type path for deep equality checking.  The
-	 * normalized path is used as a quick hash key such that two data types
-	 * with different normalized paths are never considered equivalent.
+	 * A hash key for deep type equality.
 	 */
-	private static String normalizePath(DataType type) {
-		var ret = type.getDataTypePath().getPath();
+	private static final class HashKey {
+		/** The kind of type. */
+		private final Kind kind;
+		/** The size of the type. */
+		private final int size;
+		/** The name of the type. */
+		private final String name;
+		/** The components of a qualified type name. */
+		private final List<String> path;
+		/** Return kind. */
+		private final Kind retKind;
+		/** Parameter kinds. */
+		private final List<Kind> paramKinds;
 
-		// Ignore the file that defined the path
-		ret = ret.replaceFirst("^/DWARF/([^\\\\/]|\\\\/)*/", "/DWARF/");
+		HashKey(DataType type) {
+			this.kind = Kind.of(type);
 
-		// Whenever GHIDRA fails to merge two data types with the same
-		// name, it appends .conflict, .conflict1, .conflict2, etc.
-		// Strip this off so we can unify them if possible.
-		ret = ret.replaceAll("\\.conflict[0-9]*", "");
+			if (type instanceof FunctionDefinition func) {
+				// Ignore names for function types
+				this.size = -1;
+				this.name = "";
+				this.path = List.of();
+				this.retKind = Kind.of(func.getReturnType());
+				this.paramKinds = new ArrayList<>();
+				for (var param : func.getArguments()) {
+					this.paramKinds.add(Kind.of(param.getDataType()));
+				}
+			} else {
+				this.size = type.getLength();
+				this.retKind = null;
+				this.paramKinds = List.of();
 
-		return ret;
+				// Whenever GHIDRA fails to merge two data types with the same
+				// name, it appends .conflict, .conflict1, .conflict2, etc.
+				// Strip this off so we can unify them if possible.
+				var name = type.getDataTypePath().getDataTypeName();
+				this.name = name.replaceAll("\\.conflict[0-9]*", "");
+
+				this.path = new ArrayList<>();
+				var cat = type.getCategoryPath().getPathElements();
+				for (int i = 0; i < cat.length; ++i) {
+					if (i == 1 && cat[0].equals("DWARF")) {
+						// Ignore the file that defined the path
+						continue;
+					} else {
+						this.path.add(cat[i]);
+					}
+				}
+			}
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (obj == this) {
+				return true;
+			} else if (obj instanceof HashKey other) {
+				return this.kind == other.kind
+					&& this.size == other.size
+					&& this.name.equals(other.name)
+					&& this.path.equals(other.path)
+					&& this.retKind == other.retKind
+					&& this.paramKinds.equals(other.paramKinds);
+			} else {
+				return false;
+			}
+		}
+
+		@Override
+		public int hashCode() {
+			return Objects.hash(this.kind, this.size, this.name, this.path, this.retKind, this.paramKinds);
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder str = new StringBuilder();
+
+			str.append(this.kind)
+				.append(" ");
+
+			for (int i = 0; i < this.path.size(); ++i) {
+				if (i > 0) {
+					str.append("::");
+				}
+				str.append(CategoryPath.unescapeString(this.path.get(i)));
+			}
+
+			if (!this.path.isEmpty()) {
+				str.append("::");
+			}
+			str.append(this.name);
+
+			if (this.retKind != null) {
+				str.append(this.retKind)
+					.append("(");
+				for (int i = 0; i < this.paramKinds.size(); ++i) {
+					if (i > 0) {
+						str.append(", ");
+					}
+					str.append(this.paramKinds.get(i));
+				}
+				str.append(")");
+			}
+
+			if (this.size >= 0) {
+				str.append(" [")
+					.append(this.size)
+					.append(" bytes]");
+			}
+
+			return str.toString();
+		}
 	}
+
+	/** Global cache of data types known to be equivalent. */
+	static final Cache<ShallowKey, Set<ShallowKey>> EQ_CACHE = Cache.unlocked(k -> ConcurrentHashMap.newKeySet());
 
 	/**
 	 * Structural equality checker.
@@ -332,18 +476,6 @@ class BcpiTypeCache {
 				return true;
 			}
 
-			var aSize = a.getLength();
-			var bSize = b.getLength();
-			if (aSize != bSize) {
-				return failure(a, b, "size %d != %d", aSize, bSize);
-			}
-
-			var aPath = normalizePath(a);
-			var bPath = normalizePath(b);
-			if (!aPath.equals(bPath)) {
-				return failure(a, b, "qualified name `%s` != `%s`", aPath, bPath);
-			}
-
 			var aKey = new ShallowKey(a);
 			var bKey = new ShallowKey(b);
 			if (EQ_CACHE.get(aKey).contains(bKey)) {
@@ -351,6 +483,12 @@ class BcpiTypeCache {
 			}
 			if (this.cache.getOrDefault(aKey, Set.of()).contains(bKey)) {
 				return true;
+			}
+
+			var aHash = new HashKey(a);
+			var bHash = new HashKey(b);
+			if (!aHash.equals(bHash)) {
+				return failure(a, b, "hash key `%s` != `%s`", aHash, bHash);
 			}
 
 			this.todoA.addLast(a);
@@ -373,6 +511,11 @@ class BcpiTypeCache {
 
 			// Don't warn about bit-fields
 			if (this.typeA instanceof BitFieldDataType || this.typeB instanceof BitFieldDataType) {
+				return false;
+			}
+
+			// Don't warn about functions
+			if (this.typeA instanceof FunctionDefinition || this.typeB instanceof FunctionDefinition) {
 				return false;
 			}
 
@@ -400,11 +543,11 @@ class BcpiTypeCache {
 	 */
 	private static final class DeepKey {
 		final DataType type;
-		final String path;
+		final HashKey key;
 
 		DeepKey(DataType type) {
 			this.type = type;
-			this.path = normalizePath(type);
+			this.key = new HashKey(type);
 		}
 
 		@Override
@@ -412,15 +555,17 @@ class BcpiTypeCache {
 			if (obj == this) {
 				return true;
 			} else if (obj instanceof DeepKey other) {
-				return new DeepEq(this.type, other.type).check();
-			} else {
-				return false;
+				if (this.key.equals(other.key)) {
+					return new DeepEq(this.type, other.type).check();
+				}
 			}
+
+			return false;
 		}
 
 		@Override
 		public int hashCode() {
-			return this.path.hashCode();
+			return this.key.hashCode();
 		}
 	}
 
@@ -513,6 +658,9 @@ class BcpiTypeCache {
 	 * Generate strings describing two Ghidra types, including any relevant differences.
 	 */
 	static void describeTypes(DataType a, DataType b, StringBuilder aStr, StringBuilder bStr) {
+		aStr.append(Kind.of(a)).append(" ");
+		bStr.append(Kind.of(b)).append(" ");
+
 		var aProg = getProgram(a);
 		var bProg = getProgram(b);
 		if (!Objects.equals(aProg, bProg)) {
