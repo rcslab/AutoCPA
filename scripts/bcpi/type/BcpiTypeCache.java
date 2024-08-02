@@ -284,6 +284,12 @@ class BcpiTypeCache {
 					return failure(a, b, "field %d offset %d != %d", i, af.getOffset(), bf.getOffset());
 				}
 
+				var afName = af.getFieldName();
+				var bfName = bf.getFieldName();
+				if (!Objects.equals(afName, bfName)) {
+					return failure(a, b, "field %d name `%s`' != `%s`'", i, afName, bfName);
+				}
+
 				if (!pushCheck(af.getDataType(), bf.getDataType())) {
 					return false;
 				}
