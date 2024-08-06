@@ -161,8 +161,7 @@ public class ControlFlowGraph {
 
 		// Make sure the graph has a unique sink
 		CodeBlockVertex sink = new CodeBlockVertex("SINK");
-		Set<CodeBlockVertex> sinks = findSinksAndLoops(source);
-		for (CodeBlockVertex vertex : sinks) {
+		for (CodeBlockVertex vertex : GraphAlgorithms.getEntryPoints(this.reverseCfg)) {
 			addEdge(vertex, sink);
 		}
 
@@ -200,39 +199,6 @@ public class ControlFlowGraph {
 		this.reverseCfg.addVertex(to);
 		this.reverseCfg.addVertex(from);
 		this.reverseCfg.addEdge(new CodeBlockEdge(to, from));
-	}
-
-	/**
-	 * Infinite loops in the CFG do not reach the sink node, making us fail to construct the
-	 * post-dominator tree.  This function finds the "last" node in every infinite loop so we
-	 * can connect it to the sink.
-	 */
-	private Set<CodeBlockVertex> findSinksAndLoops(CodeBlockVertex source) {
-		Set<CodeBlockVertex> seen = new HashSet<>();
-		seen.add(source);
-
-		Set<CodeBlockVertex> results = new HashSet<>();
-		findSinksAndLoops(source, new HashSet<>(), seen, results);
-		return results;
-	}
-
-	private void findSinksAndLoops(CodeBlockVertex vertex, Set<CodeBlockVertex> parents, Set<CodeBlockVertex> seen, Set<CodeBlockVertex> results) {
-		boolean backOnly = true;
-		parents.add(vertex);
-
-		for (CodeBlockVertex child : this.cfg.getSuccessors(vertex)) {
-			if (!parents.contains(child)) {
-				backOnly = false;
-				if (seen.add(child)) {
-					findSinksAndLoops(child, parents, seen, results);
-				}
-			}
-		}
-		parents.remove(vertex);
-
-		if (backOnly) {
-			results.add(vertex);
-		}
 	}
 
 	/**
