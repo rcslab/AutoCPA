@@ -141,7 +141,13 @@ class BcpiTypeCache {
 					this.paramKinds.add(Kind.of(param.getDataType()));
 				}
 			} else {
-				this.size = type.getLength();
+				if (type instanceof TypeDef) {
+					// Ignore sizes for typedefs since their target might get canonicalized
+					this.size = -1;
+				} else {
+					this.size = type.getLength();
+				}
+
 				this.retKind = null;
 				this.paramKinds = List.of();
 
