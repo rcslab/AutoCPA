@@ -141,7 +141,13 @@ class BcpiTypeCache {
 					this.paramKinds.add(Kind.of(param.getDataType()));
 				}
 			} else {
-				this.size = type.getLength();
+				if (type instanceof TypeDef) {
+					// Ignore sizes for typedefs since their target might get canonicalized
+					this.size = -1;
+				} else {
+					this.size = type.getLength();
+				}
+
 				this.retKind = null;
 				this.paramKinds = List.of();
 
@@ -582,23 +588,6 @@ class BcpiTypeCache {
 	}
 
 	/**
-	 * @return Whether a data type is incomplete (e.g. forward-declared).
-	 */
-	private static boolean isIncomplete(DataType type) {
-		// Don't worry about pointers etc.
-		if (!(type instanceof Composite)) {
-			return false;
-		}
-
-		// Forward-declared types end up with a category path like
-		// /DWARF/_UNCATEGORIZED_/foo
-		var path = type.getDataTypePath().getCategoryPath().getPathElements();
-		return path.length >= 2
-			&& path[0].equals("DWARF")
-			&& path[1].equals("_UNCATEGORIZED_");
-	}
-
-	/**
 	 * Apply some pre-unification fixups to types.
 	 */
 	static DataType canonicalize(DataType type) {
@@ -614,25 +603,23 @@ class BcpiTypeCache {
 		}
 
 		// Try to resolve forward-declared types to a complete definition
-		if (isIncomplete(type)) {
+		if (type.isNotYetDefined()) {
 			var name = type.getDataTypePath().getDataTypeName();
 			var candidates = new ArrayList<DataType>();
 			var dtm = type.getDataTypeManager();
 			if (dtm != null) {
 				dtm.findDataTypes(name, candidates);
 			}
-			candidates.removeIf(t -> isIncomplete(t));
+			candidates.removeIf(DataType::isNotYetDefined);
 
-			// If we couldn't find it in the same program, look in the rest
-			if (candidates.isEmpty()) {
-				var ctx = AnalysisContext.current();
-				if (ctx != null) {
-					for (var prog : ctx.getPrograms()) {
-						prog.getDataTypeManager().findDataTypes(name, candidates);
-					}
+			var ctx = AnalysisContext.current();
+			if (candidates.isEmpty() && ctx != null) {
+				// If we couldn't find it in the same program, look in the rest
+				for (var prog : ctx.getPrograms()) {
+					prog.getDataTypeManager().findDataTypes(name, candidates);
 				}
+				candidates.removeIf(DataType::isNotYetDefined);
 			}
-			candidates.removeIf(t -> isIncomplete(t));
 
 			if (candidates.isEmpty()) {
 				Log.trace("Could not resolve incomplete type `%s`", fullyQualifiedName(type));
