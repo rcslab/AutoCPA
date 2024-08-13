@@ -31,7 +31,7 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
-FULL=$(realpath -- "$1")
+FULL="$1"
 SHORT=$(basename -- "$FULL")
 shift
 

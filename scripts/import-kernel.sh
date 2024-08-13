@@ -8,7 +8,7 @@ fi
 ROOT=$(realpath "$(dirname "$0")/..")
 . "$ROOT/scripts/util.sh"
 
-FULL=$(realpath "$1")
+FULL="$1"
 SHORT=$(basename "$FULL")
 
 cat_or_kldstat() {
