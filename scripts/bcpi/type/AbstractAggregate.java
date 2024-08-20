@@ -52,4 +52,9 @@ abstract class AbstractAggregate extends AbstractType implements BcpiAggregate {
 		}
 		return new Layout(align, List.copyOf(fields));
 	}
+
+	@Override
+	public int getAggregateDepth() {
+		return getLayout().getAggregateDepth();
+	}
 }

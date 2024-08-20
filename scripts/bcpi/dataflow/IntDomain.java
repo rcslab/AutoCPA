@@ -20,7 +20,7 @@ import java.util.function.UnaryOperator;
 /**
  * The abstract domain for integer varnodes.
  */
-public class IntDomain implements SparseDomain<IntDomain, IntDomain> {
+public class IntDomain implements Lattice<IntDomain> {
 	private static final BitSet SUPPORTED = new BitSet(PcodeOp.PCODE_MAX);
 	static {
 		SUPPORTED.set(PcodeOp.BOOL_AND);
@@ -210,11 +210,11 @@ public class IntDomain implements SparseDomain<IntDomain, IntDomain> {
 		});
 	}
 
-	@Override
-	public IntDomain getDefault(Varnode vn) {
+	public static IntDomain initial(VarOp vop) {
+		var vn = vop.getVar();
 		if (vn.isConstant()) {
 			return constant(vn.getOffset());
-		} else if (vn.getDef() == null) {
+		} else if (vop.getOp() == null) {
 			// Parameters etc. can be anything
 			return top();
 		} else {
@@ -579,18 +579,15 @@ public class IntDomain implements SparseDomain<IntDomain, IntDomain> {
 		}
 	}
 
-	/**
-	 * @return A VarMap that sign-extends.
-	 */
-	private static VarMap<IntDomain> sext(VarMap<IntDomain> map) {
-		return v -> map.get(v).signExtend(v);
+	private static IntDomain getInput(List<BcpiDomain> inputs, int i) {
+		return inputs.get(i).getIntFacts();
 	}
 
 	/**
 	 * Evaluate a unary pcode operation.
 	 */
-	private static IntDomain unaryOp(PcodeOp op, VarMap<IntDomain> map, UnaryOperator<IntDomain> func) {
-		var input = map.getInput(op, 0);
+	private static IntDomain unaryOp(PcodeOp op, List<BcpiDomain> inputs, UnaryOperator<IntDomain> func) {
+		var input = getInput(inputs, 0);
 		return func.apply(input)
 			.truncate(op.getOutput());
 	}
@@ -618,9 +615,9 @@ public class IntDomain implements SparseDomain<IntDomain, IntDomain> {
 	/**
 	 * Evaluate a binary pcode operation.
 	 */
-	private static IntDomain binaryOp(PcodeOp op, VarMap<IntDomain> map, BinaryOperator<IntDomain> func) {
-		var lhs = map.getInput(op, 0);
-		var rhs = map.getInput(op, 1);
+	private static IntDomain binaryOp(PcodeOp op, List<BcpiDomain> inputs, BinaryOperator<IntDomain> func) {
+		var lhs = getInput(inputs, 0);
+		var rhs = getInput(inputs, 1);
 		return func.apply(lhs, rhs)
 			.truncate(op.getOutput());
 	}
@@ -633,100 +630,109 @@ public class IntDomain implements SparseDomain<IntDomain, IntDomain> {
 	/**
 	 * Evaluate a binary pcode predicate.
 	 */
-	private static IntDomain binaryPred(PcodeOp op, VarMap<IntDomain> map, LongBinaryPredicate pred) {
-		return binaryOp(op, map, (a, b) -> a.mapConstants(b, (l, r) -> constant(pred.test(l, r) ? 1 : 0)));
+	private static IntDomain binaryPred(PcodeOp op, List<BcpiDomain> inputs, LongBinaryPredicate pred) {
+		return binaryOp(op, inputs, (a, b) -> a.mapConstants(b, (l, r) -> constant(pred.test(l, r) ? 1 : 0)));
 	}
 
-	@Override
-	public boolean supports(PcodeOp op) {
+	public boolean supports(VarOp vop) {
+		var op = vop.getOp();
+		if (op == null) {
+			return false;
+		}
+
 		return SUPPORTED.get(op.getOpcode());
 	}
 
-	@Override
-	public IntDomain visit(PcodeOp op, VarMap<IntDomain> map) {
+	public IntDomain visit(PcodeOp op, List<BcpiDomain> inputs) {
 		switch (op.getOpcode()) {
 			case PcodeOp.COPY:
 			case PcodeOp.CAST:
-				return map.getInput(op, 0).copy();
+				return getInput(inputs, 0).copy();
 
-			case PcodeOp.MULTIEQUAL:
+			case PcodeOp.MULTIEQUAL: {
 				// Phi node
-				return bottom().join(map.getInputs(op));
+				var ret = bottom();
+				for (var input : inputs) {
+					ret.joinInPlace(input.getIntFacts());
+				}
+				return ret;
+			}
 
 			case PcodeOp.SUBPIECE:
 				// (l, r) -> l >> 8 * r
-				return binaryOp(op, map, (l, r) -> l.shiftRightUnsigned(r.multiply(8)));
+				return binaryOp(op, inputs, (l, r) -> l.shiftRightUnsigned(r.multiply(8)));
 
 			case PcodeOp.POPCOUNT:
-				return unaryOp(op, map, IntDomain::bitCount);
+				return unaryOp(op, inputs, IntDomain::bitCount);
 
 			case PcodeOp.INT_EQUAL:
 				// l == r <=> (l - r) != 0
-				return binaryOp(op, map, IntDomain::subtract).isNonzero();
+				return binaryOp(op, inputs, IntDomain::subtract).isNonzero();
 			case PcodeOp.INT_NOTEQUAL:
 				// l == r <=> (l - r) == 0
-				return binaryOp(op, map, IntDomain::subtract).isZero();
+				return binaryOp(op, inputs, IntDomain::subtract).isZero();
 
 			case PcodeOp.INT_LESS:
-				return binaryPred(op, map, (l, r) -> Long.compareUnsigned(l, r) < 0);
+				return binaryPred(op, inputs, (l, r) -> Long.compareUnsigned(l, r) < 0);
 			case PcodeOp.INT_LESSEQUAL:
-				return binaryPred(op, map, (l, r) -> Long.compareUnsigned(l, r) <= 0);
+				return binaryPred(op, inputs, (l, r) -> Long.compareUnsigned(l, r) <= 0);
 
 			case PcodeOp.INT_SLESS:
-				return binaryPred(op, sext(map), (l, r) -> l < r);
+				return binaryPred(op, inputs, (l, r) -> l < r);
 			case PcodeOp.INT_SLESSEQUAL:
-				return binaryPred(op, sext(map), (l, r) -> l <= r);
+				return binaryPred(op, inputs, (l, r) -> l <= r);
 
 			case PcodeOp.INT_ZEXT:
-				return map.getInput(op, 0).copy();
+				return getInput(inputs, 0).copy();
 			case PcodeOp.INT_SEXT:
-				return sext(map).getInput(op, 0).copy();
+				return getInput(inputs, 0)
+					.signExtend(op.getOutput());
 
 			case PcodeOp.INT_ADD:
-				return binaryOp(op, map, IntDomain::add);
+				return binaryOp(op, inputs, IntDomain::add);
 			case PcodeOp.INT_SUB:
-				return binaryOp(op, map, IntDomain::subtract);
+				return binaryOp(op, inputs, IntDomain::subtract);
 
 			case PcodeOp.INT_2COMP:
-				return unaryOp(op, map, IntDomain::negate);
+				return unaryOp(op, inputs, IntDomain::negate);
 			case PcodeOp.INT_NEGATE:
-				return unaryOp(op, map, IntDomain::not);
+				return unaryOp(op, inputs, IntDomain::not);
 
 			case PcodeOp.INT_XOR:
-				return binaryOp(op, map, IntDomain::xor);
+				return binaryOp(op, inputs, IntDomain::xor);
 			case PcodeOp.INT_AND:
-				return binaryOp(op, map, IntDomain::and);
+				return binaryOp(op, inputs, IntDomain::and);
 			case PcodeOp.INT_OR:
-				return binaryOp(op, map, IntDomain::or);
+				return binaryOp(op, inputs, IntDomain::or);
 
 			case PcodeOp.INT_LEFT:
-				return binaryOp(op, map, IntDomain::shiftLeft);
+				return binaryOp(op, inputs, IntDomain::shiftLeft);
 			case PcodeOp.INT_RIGHT:
-				return binaryOp(op, map, IntDomain::shiftRightUnsigned);
+				return binaryOp(op, inputs, IntDomain::shiftRightUnsigned);
 			case PcodeOp.INT_SRIGHT:
-				return binaryOp(op, sext(map), IntDomain::shiftRight);
+				return binaryOp(op, inputs, IntDomain::shiftRight);
 
 			case PcodeOp.INT_MULT:
-				return binaryOp(op, map, IntDomain::multiply);
+				return binaryOp(op, inputs, IntDomain::multiply);
 
 			case PcodeOp.INT_DIV:
-				return binaryOp(op, map, IntDomain::divideUnsigned);
+				return binaryOp(op, inputs, IntDomain::divideUnsigned);
 			case PcodeOp.INT_SDIV:
-				return binaryOp(op, sext(map), IntDomain::divide);
+				return binaryOp(op, inputs, IntDomain::divide);
 
 			case PcodeOp.INT_REM:
-				return binaryOp(op, map, IntDomain::remainderUnsigned);
+				return binaryOp(op, inputs, IntDomain::remainderUnsigned);
 			case PcodeOp.INT_SREM:
-				return binaryOp(op, sext(map), IntDomain::remainder);
+				return binaryOp(op, inputs, IntDomain::remainder);
 
 			case PcodeOp.BOOL_NEGATE:
-				return map.getInput(op, 0).isZero();
+				return getInput(inputs, 0).isZero();
 			case PcodeOp.BOOL_XOR:
-				return binaryOp(op, map, IntDomain::xor).isNonzero();
+				return binaryOp(op, inputs, IntDomain::xor).isNonzero();
 			case PcodeOp.BOOL_AND:
-				return binaryOp(op, map, IntDomain::and).isNonzero();
+				return binaryOp(op, inputs, IntDomain::and).isNonzero();
 			case PcodeOp.BOOL_OR:
-				return binaryOp(op, map, IntDomain::or).isNonzero();
+				return binaryOp(op, inputs, IntDomain::or).isNonzero();
 
 			default:
 				return top();

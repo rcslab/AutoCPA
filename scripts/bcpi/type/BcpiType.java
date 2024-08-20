@@ -100,6 +100,14 @@ public interface BcpiType {
 	}
 
 	/**
+	 * @return The maximum aggregate nesting depth of this type, i.e. how many layers of
+	 *         struct { union { struct { ... }}} there are.
+	 */
+	default int getAggregateDepth() {
+		return 0;
+	}
+
+	/**
 	 * Format this type as a C declaration.
 	 */
 	default String toC() {

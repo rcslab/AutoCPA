@@ -1,8 +1,8 @@
 package bcpi;
 
 import bcpi.dataflow.BcpiDomain;
-import bcpi.dataflow.BcpiVarDomain;
 import bcpi.dataflow.DataFlow;
+import bcpi.dataflow.VarOp;
 import bcpi.type.BcpiType;
 import bcpi.util.Counter;
 import bcpi.util.Tty;
@@ -218,8 +218,8 @@ public class PcodeFormatter {
 	/**
 	 * @return The data flow facts for a varnode.
 	 */
-	private BcpiVarDomain getFacts(Varnode vn) {
-		return this.dataFlow.fixpoint(vn).getFacts(vn);
+	private BcpiDomain getFacts(Varnode vn) {
+		return this.dataFlow.fixpoint(vn);
 	}
 
 	/**
@@ -228,40 +228,45 @@ public class PcodeFormatter {
 	public void printDataFlow(Address addr) {
 		printSignature();
 
-		var ops = new ArrayList<PcodeOp>();
-		var seen = new HashSet<SequenceNumber>();
+		var vops = new ArrayList<VarOp>();
+		var seen = new HashSet<VarOp>();
 
 		this.highFunc.getPcodeOps(addr).forEachRemaining(op -> {
-			ops.add(op);
-			seen.add(op.getSeqnum());
+			var vn = op.getOutput();
+			if (vn != null) {
+				var vop = new VarOp(vn, op);
+				vops.add(vop);
+				seen.add(vop);
+			}
 		});
 
 		// Dependency-order the per-instruction pcode ops
 		var order = Comparator
-			.<PcodeOp>comparingInt(op -> op.getSeqnum().getOrder())
+			.<VarOp>comparingInt(vop -> vop.getSeqnum().getOrder())
 			.reversed();
-		Collections.sort(ops, order);
+		Collections.sort(vops, order);
 
-		for (int i = 0; i < ops.size(); ++i) {
-			var op = ops.get(i);
-			var inputs = new ArrayList<>(this.domain.getInputs(op));
+		for (int i = 0; i < vops.size(); ++i) {
+			var vop = vops.get(i);
+			var inputs = new ArrayList<>(this.domain.getInputs(vop));
 			Collections.reverse(inputs);
 			for (var input : inputs) {
-				if (seen.add(input.getSeqnum())) {
-					ops.add(input);
+				if (input.getOp() != null && seen.add(input)) {
+					vops.add(input);
 				}
 			}
 		}
 
-		if (ops.isEmpty()) {
+		if (vops.isEmpty()) {
 			print(this.listing.getInstructionAt(addr));
 			Tty.print("    No pcode\n");
 			return;
 		}
 
 		Address lastAddr = null;
-		Collections.reverse(ops);
-		for (var op : ops) {
+		Collections.reverse(vops);
+		for (var vop : vops) {
+			var op = vop.getOp();
 			var opAddr = op.getSeqnum().getTarget();
 			if (!opAddr.equals(lastAddr)) {
 				print(this.listing.getInstructionAt(opAddr));
@@ -270,13 +275,10 @@ public class PcodeFormatter {
 
 			Tty.print("      ");
 
-			var out = op.getOutput();
-			if (out != null) {
-				printTyped(out);
-				Tty.print(" = ");
-			}
+			var out = vop.getVar();
+			printTyped(out);
 
-			Tty.print("<b><fg=green>%s</fg></b>(", op.getMnemonic());
+			Tty.print(" = <b><fg=green>%s</fg></b>(", op.getMnemonic());
 			var inputs = op.getInputs();
 			if (inputs.length > 0) {
 				Tty.print("\n");
@@ -288,10 +290,7 @@ public class PcodeFormatter {
 				Tty.print("      ");
 			}
 			Tty.print(")\n");
-
-			if (out != null) {
-				Tty.print("      = <b>%s</b>\n", getFacts(out));
-			}
+			Tty.print("      = <b>%s</b>\n", getFacts(out));
 		}
 	}
 }

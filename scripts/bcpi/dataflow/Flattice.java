@@ -51,6 +51,13 @@ public final class Flattice<T> implements Lattice<Flattice<T>> {
 	}
 
 	/**
+	 * @return The lattice element wrapping the given object, otherwise bottom().
+	 */
+	public static <U> Flattice<U> ofOptional(Optional<U> element) {
+		return new Flattice<>(element.orElse(null), false);
+	}
+
+	/**
 	 * @return The wrapped element, if any.
 	 */
 	public Optional<T> get() {
@@ -71,7 +78,7 @@ public final class Flattice<T> implements Lattice<Flattice<T>> {
 
 	@Override
 	public boolean joinInPlace(Flattice<T> other) {
-		if (isTop() || this.equals(other)) {
+		if (isTop() || other.isBottom() || this.equals(other)) {
 			return false;
 		} else if (isBottom()) {
 			this.element = other.element;

@@ -136,8 +136,7 @@ public class FieldReferences {
 			return;
 		}
 
-		var nestedState = BcpiDomain.forCall(op, highTarget, dataFlow);
-		var nestedFlow = new DataFlow<>(nestedState);
+		var nestedFlow = dataFlow.forCall(op, highTarget);
 
 		FieldReferences nestedRefs = nested();
 		nestedRefs.computeDataFlow(depth - 1, highTarget, nestedFlow);
@@ -165,8 +164,7 @@ public class FieldReferences {
 		// STORE: input2: Varnode containing data to be stored.
 		Varnode value = isRead ? op.getOutput() : op.getInput(2);
 
-		var state = dataFlow.fixpoint(ptr);
-		var facts = state.getPtrFacts(ptr);
+		var facts = dataFlow.fixpoint(ptr).getPtrFacts();
 		if (!facts.hasType() || !facts.hasOffset()) {
 			return;
 		}
