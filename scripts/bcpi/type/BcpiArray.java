@@ -22,6 +22,13 @@ public final class BcpiArray extends AbstractType {
 		return (BcpiArray)BcpiType.from(type);
 	}
 
+	/**
+	 * @return The number of array elements.
+	 */
+	public int getCount() {
+		return this.count;
+	}
+
 	@Override
 	public Array toGhidra() {
 		return (Array)super.toGhidra();
@@ -39,11 +46,9 @@ public final class BcpiArray extends AbstractType {
 		return this.count * this.wrapped.getByteSize();
 	}
 
-	/**
-	 * @return The number of array elements.
-	 */
-	public int getCount() {
-		return this.count;
+	@Override
+	public int getAggregateDepth() {
+		return 1 + this.wrapped.getAggregateDepth();
 	}
 
 	@Override

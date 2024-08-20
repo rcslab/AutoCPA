@@ -46,4 +46,9 @@ public final class BcpiTypeDef extends AbstractType {
 	public BcpiType dereference() {
 		return this.resolved.dereference();
 	}
+
+	@Override
+	public int getAggregateDepth() {
+		return this.resolved.getAggregateDepth();
+	}
 }

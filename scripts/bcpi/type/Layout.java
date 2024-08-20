@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
  */
 public final class Layout {
 	private int size;
+	private int maxDepth;
 	private final int align;
 	private final List<Field> fields;
 
@@ -20,6 +21,11 @@ public final class Layout {
 
 		this.size = 0;
 		updateSize();
+
+		this.maxDepth = 0;
+		for (var field : fields) {
+			this.maxDepth = Math.max(this.maxDepth, field.getType().getAggregateDepth());
+		}
 	}
 
 	/**
@@ -115,8 +121,18 @@ public final class Layout {
 	private void updateSize() {
 		int i = this.fields.size();
 		if (i > 0) {
-			this.size = alignCeil(this.fields.get(i - 1).getEndByte(), this.align);
+			var lastField = this.fields.get(i - 1);
+			this.size = alignCeil(lastField.getEndByte(), this.align);
+			this.maxDepth = Math.max(this.maxDepth, lastField.getType().getAggregateDepth());
 		}
+	}
+
+	/**
+	 * @return The maximum aggregate nesting depth of this layout, i.e. how many layers of
+	 *         struct { union { struct { ... }}} there are.
+	 */
+	public int getAggregateDepth() {
+		return 1 + this.maxDepth;
 	}
 
 	@Override
