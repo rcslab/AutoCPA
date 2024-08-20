@@ -51,6 +51,13 @@ public final class Flattice<T> implements Lattice<Flattice<T>> {
 	}
 
 	/**
+	 * @return The lattice element wrapping the given object, otherwise bottom().
+	 */
+	public static <U> Flattice<U> ofOptional(Optional<U> element) {
+		return new Flattice<>(element.orElse(null), false);
+	}
+
+	/**
 	 * @return The wrapped element, if any.
 	 */
 	public Optional<T> get() {

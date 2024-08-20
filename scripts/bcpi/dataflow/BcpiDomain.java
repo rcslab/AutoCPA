@@ -1,104 +1,106 @@
 package bcpi.dataflow;
 
-import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
-import java.util.Collection;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.stream.Collectors;
 
 /**
  * The BCPI abstract domain.
  */
-public class BcpiDomain implements Domain<BcpiDomain> {
-	private final VarDomain<BcpiVarDomain> vars;
+public class BcpiDomain extends ForwardDomain<BcpiDomain> {
+	private final PtrDomain ptrFacts;
+	private final IntDomain intFacts;
 
-	private BcpiDomain(VarDomain<BcpiVarDomain> vars) {
-		this.vars = vars;
+	private BcpiDomain(PtrDomain ptrFacts, IntDomain intFacts) {
+		this.ptrFacts = ptrFacts;
+		this.intFacts = intFacts;
 	}
 
 	/**
 	 * @return The bottom lattice element.
 	 */
 	public static BcpiDomain bottom() {
-		return new BcpiDomain(VarDomain.bottom(BcpiVarDomain.bottom()));
+		return new BcpiDomain(PtrDomain.bottom(), IntDomain.bottom());
 	}
 
 	/**
 	 * @return Whether this is the bottom lattice element.
 	 */
 	public boolean isBottom() {
-		return this.vars.isBottom();
+		return this.ptrFacts.isBottom() && this.intFacts.isBottom();
 	}
 
 	/**
-	 * @return The abstract state for a called function.
+	 * @return The top lattice element.
 	 */
-	public static BcpiDomain forCall(PcodeOp op, HighFunction func, DataFlow<BcpiDomain> caller) {
-		var callee = bottom();
-		var locals = func.getLocalSymbolMap();
-		var args = op.getInputs();
-
-		for (int i = 0; i < locals.getNumParams() && i + 1 < args.length; ++i) {
-			var param = locals.getParam(i);
-			if (param == null) {
-				continue;
-			}
-			for (var vn : param.getInstances()) {
-				// Copy abstract values from the call arguments to the formal parameters
-				var state = caller.fixpoint(vn);
-				var arg = state.vars.get(args[i + 1]);
-				callee.vars.put(vn, arg);
-			}
-		}
-
-		return callee;
+	public static BcpiDomain top() {
+		return new BcpiDomain(PtrDomain.top(), IntDomain.top());
 	}
 
 	/**
-	 * @return The abstract value for the given varnode.
+	 * @return Whether this is the top lattice element.
 	 */
-	public BcpiVarDomain getFacts(Varnode vn) {
-		return this.vars.get(vn);
+	public boolean isTop() {
+		return this.ptrFacts.isTop() && this.intFacts.isTop();
 	}
 
 	/**
-	 * @return The abstract value for the given pointer.
+	 * @return The abstract value of this variable as a pointer.
 	 */
-	public PtrDomain getPtrFacts(Varnode vn) {
-		return getFacts(vn).getPtrFacts();
+	public PtrDomain getPtrFacts() {
+		return this.ptrFacts;
 	}
 
 	/**
-	 * @return The abstract value for the given integer.
+	 * @return The abstract value of this variable as an integer.
 	 */
-	public IntDomain getIntFacts(Varnode vn) {
-		return getFacts(vn).getIntFacts();
+	public IntDomain getIntFacts() {
+		return this.intFacts;
 	}
 
 	@Override
 	public BcpiDomain copy() {
-		return new BcpiDomain(this.vars.copy());
+		return new BcpiDomain(
+			this.ptrFacts.copy(),
+			this.intFacts.copy());
 	}
 
 	@Override
 	public boolean joinInPlace(BcpiDomain other) {
-		return this.vars.joinInPlace(other.vars);
+		return this.ptrFacts.joinInPlace(other.ptrFacts)
+			| this.intFacts.joinInPlace(other.intFacts);
 	}
 
 	@Override
-	public Collection<PcodeOp> getInputs(PcodeOp op) {
-		return this.vars.getInputs(op);
+	public BcpiDomain initial(VarOp vop) {
+		return new BcpiDomain(
+			PtrDomain.initial(vop),
+			IntDomain.initial(vop));
 	}
 
 	@Override
-	public boolean supports(PcodeOp op) {
-		return this.vars.supports(op);
+	public boolean supports(VarOp vop) {
+		return this.ptrFacts.supports(vop) || this.intFacts.supports(vop);
 	}
 
 	@Override
-	public BcpiDomain visit(PcodeOp op) {
-		return new BcpiDomain(this.vars.visit(op));
+	public boolean visit(VarOp vop, List<BcpiDomain> inputs) {
+		var op = vop.getOp();
+		if (op == null) {
+			return false;
+		}
+
+		var ptrFacts = this.ptrFacts.visit(op, inputs);
+		var intFacts = this.intFacts.visit(op, inputs);
+		return this.ptrFacts.joinInPlace(ptrFacts)
+			| this.intFacts.joinInPlace(intFacts);
 	}
 
 	@Override
@@ -110,16 +112,23 @@ public class BcpiDomain implements Domain<BcpiDomain> {
 		}
 
 		var other = (BcpiDomain) obj;
-		return this.vars.equals(other.vars);
+		return this.ptrFacts.equals(other.ptrFacts)
+			&& this.intFacts.equals(other.intFacts);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(this.vars);
+		return Objects.hash(this.ptrFacts, this.intFacts);
 	}
 
 	@Override
 	public String toString() {
-		return this.vars.toString();
+		if (isBottom()) {
+			return "⊥";
+		} else if (isTop()) {
+			return "⊤";
+		} else {
+			return String.format("{ptr: %s, int: %s}", this.ptrFacts, this.intFacts);
+		}
 	}
 }

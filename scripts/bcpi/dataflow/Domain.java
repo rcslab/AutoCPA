@@ -1,27 +1,34 @@
 package bcpi.dataflow;
 
-import ghidra.program.model.pcode.PcodeOp;
-
-import java.util.Collection;
+import java.util.List;
 
 /**
  * An abstract domain for data flow analysis.
  */
 public interface Domain<T extends Lattice<T>> extends Lattice<T> {
 	/**
-	 * @return Whether the visit() method supports the given operation.
+	 * @return The initial value for the given variable.
 	 */
-	boolean supports(PcodeOp op);
+	T initial(VarOp vop);
 
 	/**
-	 * @return The set of program points that op depends on.
+	 * @return Whether the visit() method supports the given operation.
 	 */
-	Collection<PcodeOp> getInputs(PcodeOp op);
+	boolean supports(VarOp vop);
+
+	/**
+	 * @return The list of program points that vop depends on.
+	 */
+	List<VarOp> getInputs(VarOp vop);
 
 	/**
 	 * The transfer function.
 	 *
-	 * @return The abstract value at the program point op.
+	 * @param vop
+	 *            The current variable and program point.
+	 * @param inputs
+	 *            The current abstract values for the inputs.
+	 * @return Whether this value changed.
 	 */
-	T visit(PcodeOp op);
+	boolean visit(VarOp vop, List<T> inputs);
 }

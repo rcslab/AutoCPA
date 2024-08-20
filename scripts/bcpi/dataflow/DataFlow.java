@@ -1,13 +1,12 @@
 package bcpi.dataflow;
 
+import bcpi.util.WorkList;
+
+import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.pcode.SequenceNumber;
 
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.ListMultimap;
-
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,39 +21,7 @@ import java.util.concurrent.ConcurrentMap;
  */
 public final class DataFlow<T extends Domain<T>> {
 	private final T domain;
-	private final ConcurrentMap<SequenceNumber, State> cache;
-
-	/**
-	 * An abstract state both before and after a program point.
-	 */
-	private class State {
-		final T before = domain.copy();
-		T after = null;
-
-		/**
-		 * Update this state from a change to one of its inputs.
-		 *
-		 * @return Whether this state changed.
-		 */
-		boolean update(T input) {
-			if (this.before.joinInPlace(input)) {
-				this.after = null;
-				return true;
-			} else {
-				return false;
-			}
-		}
-
-		/**
-		 * Visit a program point, if necessary.
-		 */
-		T visit(PcodeOp op) {
-			if (this.after == null) {
-				this.after = this.before.visit(op);
-			}
-			return this.after;
-		}
-	}
+	private final ConcurrentMap<VarOp, T> cache;
 
 	/**
 	 * Create a new data flow context.
@@ -70,64 +37,74 @@ public final class DataFlow<T extends Domain<T>> {
 	/**
 	 * @return The solution to the data flow equations at the given program point.
 	 */
-	public T fixpoint(PcodeOp op) {
+	public T fixpoint(VarOp vop) {
 		// We use a work-list algorithm to iterate until fixpoint
-		var workList = new ArrayDeque<PcodeOp>();
+		var workList = new WorkList<VarOp>();
 
-		// Dedup PcodeOps by SequenceNumber because PcodeOp doesn't override equals()
-		var workSet = new HashSet<SequenceNumber>();
-
-		// Keep track of each operation's outputs to propagate changes
-		ListMultimap<SequenceNumber, PcodeOp> outputs = ArrayListMultimap.create();
+		// Cache each operation's inputs/outputs
+		var inputs = new HashMap<VarOp, List<VarOp>>();
+		var outputs = new HashMap<VarOp, List<VarOp>>();
 
 		// Keep a separate local cache for thread safety
-		var cache = new HashMap<SequenceNumber, State>();
+		var cache = new HashMap<VarOp, T>();
 
 		// Add the (transitive) inputs to the work list
-		var inputs = new ArrayDeque<PcodeOp>();
-		inputs.add(op);
-		while (!inputs.isEmpty()) {
-			var input = inputs.removeFirst();
-			var iseq = input.getSeqnum();
-			if (cache.containsKey(iseq)) {
+		var inputList = new WorkList<VarOp>();
+		inputList.addLast(vop);
+		while (!inputList.isEmpty()) {
+			var work = inputList.removeFirst();
+
+			var state = this.cache.get(work);
+			if (state != null) {
+				// Data flow is already solved, use the cached state
+				cache.put(work, state);
 				continue;
 			}
 
-			var state = this.cache.get(iseq);
-			if (state == null) {
-				state = new State();
+			state = this.domain.initial(work);
+			cache.put(work, state);
 
-				if (this.domain.supports(input)) {
-					for (var child : this.domain.getInputs(input)) {
-						inputs.addLast(child);
-						outputs.put(child.getSeqnum(), input);
-					}
-				}
+			if (!state.supports(work)) {
+				continue;
 			}
 
-			workList.addFirst(input);
-			workSet.add(iseq);
-			cache.put(iseq, state);
+			if (!workList.addFirst(work)) {
+				throw new RuntimeException("COW");
+			}
+
+			var workInputs = state.getInputs(work);
+			inputs.put(work, workInputs);
+
+			for (var input : workInputs) {
+				outputs.computeIfAbsent(input, k -> new ArrayList<>())
+					.add(work);
+				if (!workList.contains(input)) {
+					inputList.addLast(input);
+				}
+			}
 		}
+
+		var inputStates = new ArrayList<T>();
 
 		// Process the work list until it's empty
 		while (!workList.isEmpty()) {
 			var work = workList.removeFirst();
-			var wseq = work.getSeqnum();
-			workSet.remove(wseq);
 
-			var state = cache.get(wseq);
-			var after = state.visit(work);
+			var state = cache.get(work);
 
-			// Propagate changes to outputs
-			for (var output : outputs.get(wseq)) {
-				var oseq = output.getSeqnum();
-				var ostate = cache.get(oseq);
-				if (ostate.update(after)) {
-					// Output changed, need to re-process it
-					if (workSet.add(oseq)) {
-						workList.addLast(output);
-					}
+			// Get the current value of each input
+			inputStates.clear();
+			var workInputs = inputs.getOrDefault(work, List.of());
+			for (var input : workInputs) {
+				inputStates.add(cache.get(input));
+			}
+
+			// State is dirty, update it with new inputs
+			if (state.visit(work, inputStates)) {
+				// State changed, dirty its outputs
+				var workOutputs = outputs.getOrDefault(work, List.of());
+				for (var output : workOutputs) {
+					workList.addLast(output);
 				}
 			}
 		}
@@ -135,18 +112,41 @@ public final class DataFlow<T extends Domain<T>> {
 		// Save solutions for future calls
 		this.cache.putAll(cache);
 
-		return cache.get(op.getSeqnum()).after;
+		return cache.get(vop);
 	}
 
 	/**
 	 * @return The solution to the data flow equations at a varnode's definition.
 	 */
 	public T fixpoint(Varnode vn) {
-		var def = vn.getDef();
-		if (def == null) {
-			return this.domain.copy();
-		} else {
-			return fixpoint(def);
+		return fixpoint(new VarOp(vn, vn.getDef()));
+	}
+
+	/**
+	 * Create a nested data flow analysis for a function call.
+	 */
+	public DataFlow<T> forCall(PcodeOp op, HighFunction func) {
+		var callee = new DataFlow<>(this.domain.copy());
+		var locals = func.getLocalSymbolMap();
+		var args = op.getInputs();
+
+		for (int i = 0; i < locals.getNumParams() && i + 1 < args.length; ++i) {
+			var param = locals.getParam(i);
+			if (param == null) {
+				continue;
+			}
+
+			// args[0] is the return address
+			var argVar = args[i + 1];
+			var argState = fixpoint(argVar);
+
+			for (var paramVar : param.getInstances()) {
+				// Copy abstract values from the call arguments to the formal parameters
+				var paramVop = new VarOp(paramVar, paramVar.getDef());
+				callee.cache.put(paramVop, argState);
+			}
 		}
+
+		return callee;
 	}
 }
