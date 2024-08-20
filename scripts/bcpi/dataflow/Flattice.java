@@ -71,7 +71,7 @@ public final class Flattice<T> implements Lattice<Flattice<T>> {
 
 	@Override
 	public boolean joinInPlace(Flattice<T> other) {
-		if (isTop() || this.equals(other)) {
+		if (isTop() || other.isBottom() || this.equals(other)) {
 			return false;
 		} else if (isBottom()) {
 			this.element = other.element;
