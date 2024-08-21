@@ -125,6 +125,20 @@ If the kernel to analyze was running on a different machine, you'll need to capt
 $ ./scripts/import-kernel.sh ./kernel.full kldstat.out
 ```
 
+At this point, the extract-kernel.sh script must be run:
+
+```
+$ ./scripts/extract-kernel.sh kernel ./address_info.csv
+```
+
+Note that this will use the kernel from the current machine.  If the kernel to analyze was running on a different machine, you'll need to create a sysroot for bcpi and point it there, using the directory specified in the import-kernel step above:
+
+```
+$ mkdir -p sysroot/boot
+$ ln -s `pwd`/kernel.full sysroot/boot/kernel
+$ BCPI_SYSROOT=$PWD/sysroot ./scripts/extract-kernel.sh /boot/kernel kldstat.out address_info.csv
+```
+
 Analysis works as normal:
 
 ```
