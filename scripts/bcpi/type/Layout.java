@@ -14,10 +14,12 @@ public final class Layout {
 	private final int align;
 	private final List<Field> fields;
 
-	Layout(int size, int align, List<Field> fields) {
-		this.size = size;
+	Layout(int align, List<Field> fields) {
 		this.align = align;
 		this.fields = fields;
+
+		this.size = 0;
+		updateSize();
 	}
 
 	/**
@@ -80,8 +82,7 @@ public final class Layout {
 	 * @return A mutable copy of this layout with only the first n fields.
 	 */
 	public Layout prefix(int n) {
-		return new Layout(0, this.align, new ArrayList<>(this.fields.subList(0, n)))
-			.updateSize();
+		return new Layout(this.align, new ArrayList<>(this.fields.subList(0, n)));
 	}
 
 	/**
@@ -111,12 +112,11 @@ public final class Layout {
 		updateSize();
 	}
 
-	private Layout updateSize() {
+	private void updateSize() {
 		int i = this.fields.size();
 		if (i > 0) {
 			this.size = alignCeil(this.fields.get(i - 1).getEndByte(), this.align);
 		}
-		return this;
 	}
 
 	@Override

@@ -23,6 +23,13 @@ abstract class AbstractAggregate extends AbstractType implements BcpiAggregate {
 	}
 
 	@Override
+	public int getByteSize() {
+		// Ghidra thinks empty structs have size 1, but we want them to
+		// have size 0
+		return getLayout().getByteSize();
+	}
+
+	@Override
 	public int getByteAlignment() {
 		// Ghidra sometimes underestimates aggregate alignment, so
 		// compute it ourselves
@@ -43,6 +50,6 @@ abstract class AbstractAggregate extends AbstractType implements BcpiAggregate {
 			fields.add(field);
 			align = Math.max(align, field.getType().getByteAlignment());
 		}
-		return new Layout(getByteSize(), align, List.copyOf(fields));
+		return new Layout(align, List.copyOf(fields));
 	}
 }
